@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "provider": "claude",
+  "providers": {
+    "claude": {
+      "model": "claude-sonnet-4-20250514",
+      "base_url": "https://api.anthropic.com",
+      "max_tokens": 4096,
+      "temperature": 0.7
+    },
+    "grok": {
+      "model": "grok-3",
+      "base_url": "https://api.x.ai",
+      "max_tokens": 4096,
+      "temperature": 0.7
+    }
+  },
+  "embeddings": {
+    "ollama_host": "localhost:11434",
+    "model": "qwen3-embedding:0.6b",
+    "dimension": 1024
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 3737,
+    "open_browser": true
+  },
+  "companion": {
+    "name": "Kira",
+    "focus_areas": ["anxiety", "perfectionism"],
+    "user_name": "",
+    "custom_instructions": ""
+  },
+  "crisis": {
+    "enabled": true,
+    "hotline_country": "US"
+  },
+  "memory": {
+    "auto_save": true,
+    "briefing_on_start": true,
+    "max_context_chunks": 5
+  },
+  "ui": {
+    "theme": "warm",
+    "font_size": "medium"
+  }
+}

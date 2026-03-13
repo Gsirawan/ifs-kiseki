@@ -1,0 +1,28 @@
+# Binary
+ifs-kiseki
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# Environment / secrets
+.env
+config.json
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# OpenCode
+.opencode/
