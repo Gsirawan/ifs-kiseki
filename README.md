@@ -23,13 +23,13 @@ IFS-Kiseki is a standalone companion for [Internal Family Systems](https://ifs-i
 
 The companion is grounded in IFS principles: it speaks in parts language, guides you through the 6 F's protocol, checks for Self-energy before going deeper, and never rushes toward exile work. It is warm, patient, and knowledgeable — not a chatbot reading a manual.
 
-**It is not therapy.** It is a tool for self-reflection, built by people who believe that understanding your inner world should be accessible, private, and safe.
+**It is not therapy.** It is a tool for self-reflection, built with the belief that understanding your inner world should be accessible, private, and safe.
 
 ---
 
 ## Features
 
-🧠 **IFS-Informed Companion** — Deep knowledge of the 6 F's protocol, parts taxonomy (managers, firefighters, exiles), Self-energy (8 C's and 5 P's), unblending techniques, and session flow. The system prompt is sourced from IFS literature and crafted to feel like a warm, knowledgeable guide.
+🧠 **IFS-Informed Companion** — Deep knowledge of the 6 F's protocol, parts taxonomy (managers, firefighters, exiles), Self-energy (8 C's and 5 P's), unblending techniques, and session flow. The system prompt is sourced from IFS literature (see [Sources](#ifs-sources)) and crafted to feel like a warm, knowledgeable guide.
 
 💬 **Real-Time Streaming Chat** — Responses appear word-by-word via WebSocket. Supports Claude (Anthropic) and Grok (xAI) as LLM providers.
 
@@ -103,13 +103,11 @@ The server starts at `http://127.0.0.1:3737` and opens your browser automaticall
 
 ## Screenshots
 
-> Screenshots coming soon. Here's what you'll see:
-
-- **Onboarding** — A warm disclaimer and API key setup flow on first launch
-- **Chat** — A clean conversation interface with streaming responses and IFS-informed guidance
-- **Sidebar** — Session history with duration indicators and a briefing card
-- **Crisis Overlay** — A non-dismissible resource panel that appears when crisis language is detected
-- **Settings** — Provider selection, companion customization, and theme preferences
+<p align="center">
+  <img src="assets/ifs-kiseki-chat.png" alt="IFS-Kiseki Chat Interface" width="100%">
+  <br>
+  <sub>The chat interface — warm, grounding, and therapy-appropriate.</sub>
+</p>
 
 ---
 
@@ -352,6 +350,19 @@ Crisis detection is enabled by default and **should not be disabled**. It can be
 
 ---
 
+## IFS Sources
+
+The IFS Protocol prompt in IFS-Kiseki is sourced from established Internal Family Systems literature:
+
+- **Richard C. Schwartz** — *Internal Family Systems Therapy* (2nd ed., Guilford Press). The foundational IFS model: multiplicity of mind, Self-energy, the 8 C's and 5 P's, parts taxonomy (managers, firefighters, exiles), and the unburdening process.
+- **Jay Earley** — *Self-Therapy: A Step-By-Step Guide to Creating Wholeness Using IFS* (Pattern System Books). The 6 F's protocol (Find, Focus, Flesh Out, Feel Toward, Befriend, Fear), practical self-guided IFS exercises, protector fears framework, and the P1-P5/E1-E5 session protocols.
+- **Bonnie J. Weiss** — *Healing the Fragmented Selves of Trauma Survivors* (contributions to the IFS approach for trauma and exile work, unblending techniques).
+- **IFS Institute** — [ifs-institute.com](https://ifs-institute.com/). Official training materials, practitioner guidelines, and the "no bad parts" principle.
+
+The protocol prompt was constructed from dedicated extraction documents that systematically captured techniques, questions, and session flows from these sources. The source extraction files are referenced in `internal/chat/prompt_ifs.go`.
+
+---
+
 ## Disclaimer
 
 **IFS-Kiseki is not therapy and is not a substitute for professional mental health care.**
@@ -392,7 +403,7 @@ Contributions are welcome. If you're interested in contributing, please:
 1. Open an issue to discuss the change before submitting a PR
 2. Follow the existing code style and conventions
 3. Include tests for new functionality
-4. Do not modify the IFS Protocol prompt (`internal/chat/prompt_ifs.go`) without discussion — it is carefully sourced from IFS literature
+4. Do not modify the IFS Protocol prompt (`internal/chat/prompt_ifs.go`) without discussion — it is carefully sourced from IFS literature (see [Sources](#ifs-sources))
 
 ---
 
