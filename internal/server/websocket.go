@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -19,18 +20,26 @@ import (
 
 // wsIncoming is a JSON message from the browser.
 type wsIncoming struct {
-	Type    string `json:"type"`
-	Content string `json:"content,omitempty"`
+	Type      string `json:"type"`
+	Content   string `json:"content,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // wsOutgoing is a JSON message sent to the browser.
 type wsOutgoing struct {
-	Type      string   `json:"type"`
-	Content   string   `json:"content,omitempty"`
-	Message   string   `json:"message,omitempty"`
-	SessionID string   `json:"session_id,omitempty"`
-	Resources string   `json:"resources,omitempty"`
-	Usage     *wsUsage `json:"usage,omitempty"`
+	Type      string        `json:"type"`
+	Content   string        `json:"content,omitempty"`
+	Message   string        `json:"message,omitempty"`
+	SessionID string        `json:"session_id,omitempty"`
+	Resources string        `json:"resources,omitempty"`
+	Usage     *wsUsage      `json:"usage,omitempty"`
+	Messages  []wsMessageRO `json:"messages,omitempty"`
+}
+
+// wsMessageRO is a read-only message for session_loaded responses.
+type wsMessageRO struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // wsUsage is the token usage payload inside a "done" message.
@@ -44,14 +53,17 @@ type wsUsage struct {
 // WebSocketHandler manages WebSocket connections for chat streaming.
 type WebSocketHandler struct {
 	engine *chat.Engine
+	db     *sql.DB
 	crisis *crisis.RegexCrisisDetector // may be nil — crisis detection optional
 }
 
 // NewWebSocketHandler creates a WebSocket handler backed by the chat engine.
 // Pass a non-nil crisis detector to enable crisis keyword scanning.
-func NewWebSocketHandler(engine *chat.Engine, crisisDetector *crisis.RegexCrisisDetector) *WebSocketHandler {
+// db is required for switch_session (loading past session messages).
+func NewWebSocketHandler(engine *chat.Engine, db *sql.DB, crisisDetector *crisis.RegexCrisisDetector) *WebSocketHandler {
 	return &WebSocketHandler{
 		engine: engine,
+		db:     db,
 		crisis: crisisDetector,
 	}
 }
@@ -136,6 +148,8 @@ func (h *WebSocketHandler) dispatch(ctx context.Context, conn *websocket.Conn, m
 		h.handleMessage(ctx, conn, msg.Content)
 	case "new_session":
 		h.handleNewSession(ctx, conn)
+	case "switch_session":
+		h.handleSwitchSession(ctx, conn, msg.SessionID)
 	default:
 		_ = h.sendJSON(ctx, conn, wsOutgoing{
 			Type:    "error",
@@ -232,6 +246,97 @@ func (h *WebSocketHandler) handleNewSession(ctx context.Context, conn *websocket
 	_ = h.sendJSON(ctx, conn, wsOutgoing{
 		Type:      "session_created",
 		SessionID: sessionID,
+	})
+}
+
+// handleSwitchSession loads a past session from the database, sets it as the
+// active session on the engine (so new messages go to it), and sends the
+// session's message history back to the browser.
+func (h *WebSocketHandler) handleSwitchSession(ctx context.Context, conn *websocket.Conn, sessionID string) {
+	if sessionID == "" {
+		_ = h.sendJSON(ctx, conn, wsOutgoing{
+			Type:    "error",
+			Message: "switch_session requires a session_id",
+		})
+		return
+	}
+
+	if h.db == nil {
+		_ = h.sendJSON(ctx, conn, wsOutgoing{
+			Type:    "error",
+			Message: "database not available",
+		})
+		return
+	}
+
+	// Verify the session exists and fetch its timestamps.
+	var startedAt int64
+	var endedAt sql.NullInt64
+	err := h.db.QueryRowContext(ctx,
+		`SELECT started_at, ended_at FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&startedAt, &endedAt)
+	if err == sql.ErrNoRows {
+		_ = h.sendJSON(ctx, conn, wsOutgoing{
+			Type:    "error",
+			Message: "session not found: " + sessionID,
+		})
+		return
+	}
+	if err != nil {
+		_ = h.sendJSON(ctx, conn, wsOutgoing{
+			Type:    "error",
+			Message: "failed to query session",
+		})
+		return
+	}
+
+	// Fetch the session's messages from the database.
+	rows, err := h.db.QueryContext(ctx,
+		`SELECT role, content FROM messages WHERE session_id = ? ORDER BY timestamp`, sessionID,
+	)
+	if err != nil {
+		_ = h.sendJSON(ctx, conn, wsOutgoing{
+			Type:    "error",
+			Message: "failed to query session messages",
+		})
+		return
+	}
+	defer rows.Close()
+
+	var wireMessages []wsMessageRO
+	var chatMessages []chat.LoadedMessage
+	for rows.Next() {
+		var role, content string
+		if err := rows.Scan(&role, &content); err != nil {
+			_ = h.sendJSON(ctx, conn, wsOutgoing{
+				Type:    "error",
+				Message: "failed to read session messages",
+			})
+			return
+		}
+		wireMessages = append(wireMessages, wsMessageRO{Role: role, Content: content})
+		chatMessages = append(chatMessages, chat.LoadedMessage{Role: role, Content: content})
+	}
+	if err := rows.Err(); err != nil {
+		_ = h.sendJSON(ctx, conn, wsOutgoing{
+			Type:    "error",
+			Message: "failed to iterate session messages",
+		})
+		return
+	}
+
+	// Load the session into the engine as the active session.
+	var endedAtPtr *int64
+	if endedAt.Valid {
+		endedAtPtr = &endedAt.Int64
+	}
+	h.engine.LoadSession(sessionID, startedAt, endedAtPtr, chatMessages)
+
+	// Send the session history to the browser.
+	_ = h.sendJSON(ctx, conn, wsOutgoing{
+		Type:      "session_loaded",
+		SessionID: sessionID,
+		Messages:  wireMessages,
 	})
 }
 

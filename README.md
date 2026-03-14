@@ -1,53 +1,85 @@
-# IFS-Kiseki
+<p align="center">
+  <img src="assets/banner.png" alt="IFS-Kiseki — Self-Exploration Companion" width="100%">
+</p>
 
-A standalone self-exploration companion powered by Internal Family Systems (IFS) principles.
+<p align="center">
+  <strong>A private, IFS-informed self-exploration companion that runs on your machine.</strong><br>
+  Single Go binary. Local data. Cloud LLM. No subscriptions, no servers, no accounts.
+</p>
 
-Single Go binary. Local data. Cloud LLM. No subscriptions, no servers, no accounts.
+<p align="center">
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#crisis-safety">Crisis Safety</a>
+</p>
 
 ---
 
-## What It Is
+## What Is IFS-Kiseki?
 
-IFS-Kiseki is a private, local-first chat companion for IFS-informed self-exploration. It runs entirely on your machine — a small HTTP server that opens in your browser. Your conversation history is stored in a local SQLite database. Nothing is sent anywhere except your messages to the LLM provider you configure.
+IFS-Kiseki is a standalone companion for [Internal Family Systems](https://ifs-institute.com/) self-exploration. It runs entirely on your machine as a small HTTP server that opens in your browser. Your conversations are stored in a local SQLite database — nothing leaves your machine except the messages you send to the LLM provider you choose.
 
-It is not therapy. It is a tool for self-reflection using IFS language and principles.
+The companion is grounded in IFS principles: it speaks in parts language, guides you through the 6 F's protocol, checks for Self-energy before going deeper, and never rushes toward exile work. It is warm, patient, and knowledgeable — not a chatbot reading a manual.
+
+**It is not therapy.** It is a tool for self-reflection, built by people who believe that understanding your inner world should be accessible, private, and safe.
 
 ---
 
 ## Features
 
-- **Streaming chat** — responses appear word-by-word via WebSocket
-- **IFS-informed system prompt** — the companion uses parts language, asks about body sensations, checks for Self-energy, and does not rush toward exile work
-- **Session memory** — past sessions are summarized and surfaced at the start of new conversations
-- **Crisis safety** — keyword detection triggers a resource overlay that cannot be dismissed for 5 seconds
-- **Onboarding flow** — first-launch disclaimer and API key setup
-- **Settings** — change provider, companion name, and preferences at any time
-- **Two providers** — Claude (recommended) and Grok (premium alternative)
-- **Single binary** — no runtime dependencies beyond CGO (SQLite)
+🧠 **IFS-Informed Companion** — Deep knowledge of the 6 F's protocol, parts taxonomy (managers, firefighters, exiles), Self-energy (8 C's and 5 P's), unblending techniques, and session flow. The system prompt is sourced from IFS literature and crafted to feel like a warm, knowledgeable guide.
+
+💬 **Real-Time Streaming Chat** — Responses appear word-by-word via WebSocket. Supports Claude (Anthropic) and Grok (xAI) as LLM providers.
+
+🧩 **Session Memory** — Past sessions are saved locally and used to generate warm, contextual briefings at the start of each new conversation. Optional vector embeddings (via Ollama) enable semantic search across your history.
+
+🛡️ **Crisis Safety** — Keyword-based detection scans every message before it reaches the LLM. When crisis language is detected, a resource overlay with hotline information appears and cannot be dismissed for 5 seconds. This is non-negotiable — it ships enabled by default.
+
+🔒 **Privacy-First** — All data stays on your machine in a local SQLite database. The only outbound connections are to the LLM provider API you configure. Config files are stored with restrictive permissions (0600).
+
+🎨 **Warm, Therapy-Appropriate UI** — A clean web interface with dark mode support, designed to feel safe and grounding — not clinical, not flashy.
+
+📋 **Session History** — Browse past sessions in the sidebar, resume previous conversations, and track your exploration over time.
+
+⚙️ **Configurable Companion** — Name your companion, set focus areas (anxiety, perfectionism, relationships, etc.), add custom instructions, and switch providers at any time.
 
 ---
 
 ## Quick Start
 
-### 1. Build
+### Prerequisites
 
-Requires Go 1.22+ and a C compiler (for SQLite via CGO).
+- **Go 1.22+** and a **C compiler** (for SQLite via CGO)
+- An API key from [Anthropic](https://console.anthropic.com/) (Claude) or [xAI](https://console.x.ai/) (Grok)
+
+### 1. Clone and Build
 
 ```bash
+git clone https://github.com/Gsirawan/ifs-kiseki.git
+cd ifs-kiseki
 make build
-# or
-CGO_ENABLED=1 go build -o ifs-kiseki .
 ```
 
-### 2. Configure
-
-Copy the example config and add your API key:
+Or build directly:
 
 ```bash
-cp config.example.json ~/.config/ifs-kiseki/config.json
+CGO_ENABLED=1 go build -ldflags "-X main.Version=0.1.0" -o ifs-kiseki .
 ```
 
-Edit `~/.config/ifs-kiseki/config.json` and set your API key under `providers.claude.api_key` (or use an environment variable — see below).
+### 2. Set Your API Key
+
+Choose one:
+
+```bash
+# Option A: Environment variable (recommended)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Option B: .env file
+cp .env.example .env
+# Edit .env and add your key
+```
 
 ### 3. Run
 
@@ -55,101 +87,177 @@ Edit `~/.config/ifs-kiseki/config.json` and set your API key under `providers.cl
 ./ifs-kiseki
 ```
 
-The binary starts a local server and opens your browser to `http://127.0.0.1:3737`. On first launch, you will be shown a disclaimer and asked to accept it before proceeding.
+The server starts at `http://127.0.0.1:3737` and opens your browser automatically. On first launch, you'll see a disclaimer and onboarding flow.
 
----
-
-## Make Targets
+### Make Targets
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Compile the binary |
+| `make build` | Compile the binary with version info |
 | `make run` | Build and run |
 | `make test` | Run all tests |
-| `make dev` | Run without compiling to disk (`go run`) |
+| `make dev` | Run with `go run` (no binary on disk) |
 | `make clean` | Remove binary and local database |
+
+---
+
+## Screenshots
+
+> Screenshots coming soon. Here's what you'll see:
+
+- **Onboarding** — A warm disclaimer and API key setup flow on first launch
+- **Chat** — A clean conversation interface with streaming responses and IFS-informed guidance
+- **Sidebar** — Session history with duration indicators and a briefing card
+- **Crisis Overlay** — A non-dismissible resource panel that appears when crisis language is detected
+- **Settings** — Provider selection, companion customization, and theme preferences
+
+---
+
+## Architecture
+
+```
++------------------------------------------------------------------+
+|                        IFS-KISEKI BINARY                         |
+|                                                                  |
+|  +------------------+    +------------------+    +-----------+   |
+|  |   HTTP Server    |    |  WebSocket Hub   |    | embed.FS  |   |
+|  |  (localhost:NNN) |--->|  (streaming chat) |    | (SPA UI)  |   |
+|  +--------+---------+    +--------+---------+    +-----+-----+   |
+|           |                       |                    |          |
+|           v                       v                    v          |
+|  +------------------+    +------------------+    +-----------+   |
+|  |   REST API       |    |   Chat Engine    |    | Static    |   |
+|  |  /api/sessions   |    |  - turn mgmt     |    | Assets    |   |
+|  |  /api/settings   |    |  - prompt build   |    | HTML/CSS  |   |
+|  |  /api/briefing   |    |  - stream relay   |    | /JS       |   |
+|  +--------+---------+    +--------+---------+    +-----------+   |
+|           |                       |                              |
+|           v                       v                              |
+|  +------------------+    +------------------+                    |
+|  |   Memory Engine  |    | Provider Layer   |                    |
+|  |  (Kiseki-lite)   |    |                  |                    |
+|  |  - save session  |    | +-------------+  |                    |
+|  |  - search context|    | | Anthropic   |  |                    |
+|  |  - gen briefing  |    | | Client      |  |                    |
+|  |  SQLite + Vec    |    | | (Claude)    |  |                    |
+|  |  + Ollama embed  |    | +-------------+  |                    |
+|  +------------------+    | +-------------+  |                    |
+|                          | | OpenAI-     |  |                    |
+|                          | | Compatible  |  |                    |
+|                          | | Client      |  |                    |
+|                          | | (Grok/xAI)  |  |                    |
+|                          | +-------------+  |                    |
+|                          +------------------+                    |
+|                                                                  |
+|  +------------------+    +------------------+                    |
+|  |   Config         |    |  Crisis Safety   |                    |
+|  |  config.json     |    |  - keyword scan  |                    |
+|  |  API keys        |    |  - resource show  |                    |
+|  |  provider choice |    |  - disclaimer    |                    |
+|  +------------------+    +------------------+                    |
++------------------------------------------------------------------+
+         |                          |
+         v                          v
+   +-----------+            +---------------+
+   | SQLite DB |            | Cloud APIs    |
+   | (local)   |            | - Anthropic   |
+   | sessions  |            | - xAI (Grok)  |
+   | messages  |            | - Ollama      |
+   | embeddings|            |   (embeddings)|
+   +-----------+            +---------------+
+```
+
+**Key design decisions:**
+
+- **Single binary** — The web UI is embedded via Go's `embed.FS`. No separate frontend build step, no Node.js, no npm.
+- **Two API clients cover all providers** — The Anthropic client handles Claude; the OpenAI-compatible client handles Grok and any future provider (Ollama, GPT, Groq, etc.).
+- **Graceful degradation** — Every optional component (embeddings, memory, crisis detection) degrades gracefully when unavailable. The app always starts.
+- **Crisis detection runs before the LLM** — Messages are scanned locally before being sent to the provider. No network dependency for safety.
 
 ---
 
 ## Configuration
 
-Config is stored at `~/.config/ifs-kiseki/config.json` (respects `XDG_CONFIG_HOME`).
+Config is stored at `~/.config/ifs-kiseki/config.json` (respects `XDG_CONFIG_HOME`). On first run, a default config is created automatically.
 
-### Top-Level Fields
+See [`config.example.json`](config.example.json) for the full schema.
+
+### Top-Level
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `version` | int | `1` | Config schema version |
 | `provider` | string | `"claude"` | Active provider: `"claude"` or `"grok"` |
-| `disclaimer_accepted` | bool | `false` | Set to `true` after first-launch acceptance |
-| `disclaimer_accepted_at` | string | `""` | RFC3339 timestamp of acceptance |
+| `disclaimer_accepted` | bool | `false` | Set automatically after first-launch acceptance |
 
-### `providers.claude`
+### Providers
+
+#### `providers.claude`
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `model` | `"claude-sonnet-4-20250514"` | Model ID |
-| `base_url` | `"https://api.anthropic.com"` | API base URL |
+| `base_url` | `"https://api.anthropic.com"` | API endpoint |
 | `max_tokens` | `4096` | Max tokens per response |
 | `temperature` | `0.7` | Sampling temperature |
-| `api_key` | `""` | Your Anthropic API key (or use env var) |
+| `api_key` | `""` | API key (prefer env var `ANTHROPIC_API_KEY`) |
 
-### `providers.grok`
+#### `providers.grok`
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `model` | `"grok-4-1-fast-reasoning"` | Model ID |
-| `base_url` | `"https://api.x.ai"` | API base URL |
+| `base_url` | `"https://api.x.ai"` | API endpoint |
 | `max_tokens` | `4096` | Max tokens per response |
 | `temperature` | `0.7` | Sampling temperature |
-| `api_key` | `""` | Your xAI API key (or use env var) |
+| `api_key` | `""` | API key (prefer env var `XAI_API_KEY`) |
 
-### `embeddings`
+### Embeddings
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `ollama_host` | `"localhost:11434"` | Ollama server address |
-| `model` | `"qwen3-embedding:0.6b"` | Embedding model name |
-| `dimension` | `1024` | Embedding vector dimension |
+| `model` | `"qwen3-embedding:0.6b"` | Embedding model |
+| `dimension` | `1024` | Vector dimension |
 
-### `server`
+### Server
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `host` | `"127.0.0.1"` | Bind address (localhost only by default) |
+| `host` | `"127.0.0.1"` | Bind address (localhost only) |
 | `port` | `3737` | HTTP port |
 | `open_browser` | `true` | Auto-open browser on start |
 
-### `companion`
+### Companion
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `name` | `"Kira"` | Companion name used in responses |
-| `focus_areas` | `["anxiety", "perfectionism"]` | Areas to emphasize in the IFS prompt |
-| `user_name` | `""` | Your name (optional, used in responses) |
-| `custom_instructions` | `""` | Additional instructions appended to the companion section of the system prompt |
+| `name` | `"Kira"` | Companion display name |
+| `focus_areas` | `["anxiety", "perfectionism"]` | IFS focus areas |
+| `user_name` | `""` | Your name (optional) |
+| `custom_instructions` | `""` | Additional prompt instructions |
 
-### `crisis`
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `enabled` | `true` | Enable crisis keyword detection |
-| `hotline_country` | `"US"` | Country code for crisis resource display |
-
-### `memory`
+### Crisis
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `auto_save` | `true` | Automatically save sessions on disconnect |
-| `briefing_on_start` | `true` | Generate a summary of past sessions at the start of each new session |
-| `max_context_chunks` | `5` | Number of memory chunks to include in context |
+| `enabled` | `true` | Enable crisis detection |
+| `hotline_country` | `"US"` | Country code for resource display |
 
-### `ui`
+### Memory
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `auto_save` | `true` | Save sessions automatically |
+| `briefing_on_start` | `true` | Generate briefing from past sessions |
+| `max_context_chunks` | `5` | Memory chunks included in context |
+
+### UI
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `theme` | `"warm"` | UI theme |
-| `font_size` | `"medium"` | Font size: `"small"`, `"medium"`, `"large"` |
+| `font_size` | `"medium"` | `"small"`, `"medium"`, or `"large"` |
 
 ---
 
@@ -157,31 +265,61 @@ Config is stored at `~/.config/ifs-kiseki/config.json` (respects `XDG_CONFIG_HOM
 
 ### Claude (Recommended)
 
-Claude is the default provider and the recommended choice for IFS self-exploration work.
+Claude is the default and recommended provider for IFS self-exploration. Its conversational depth and emotional attunement make it well-suited for parts work.
 
 1. Get an API key at [console.anthropic.com](https://console.anthropic.com/)
-2. Set it in config: `providers.claude.api_key`
-   — or via environment variable: `ANTHROPIC_API_KEY=sk-ant-...`
+2. Set it via environment variable:
+   ```bash
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   ```
+   Or in `.env`:
+   ```bash
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
 
-### Grok
+### Grok (Premium Alternative)
 
-Grok (xAI) is a premium alternative provider. It uses an OpenAI-compatible API.
+Grok (xAI) is a premium alternative with strong therapeutic presence. It uses an OpenAI-compatible API.
 
 1. Get an API key at [console.x.ai](https://console.x.ai/)
-2. Set it in config: `providers.grok.api_key`
-   — or via environment variable: `XAI_API_KEY=xai-...`
+2. Set it via environment variable:
+   ```bash
+   export XAI_API_KEY="xai-..."
+   ```
 
-To switch providers, change `provider` in config.json to `"grok"`, or use the Settings page in the UI.
+To switch providers, change `"provider"` in config.json to `"grok"`, or use the Settings page in the UI.
+
+---
+
+## Embeddings (Optional)
+
+Session memory works without embeddings — sessions are saved and retrieved by recency. Embeddings add **semantic search**, surfacing relevant context from older conversations based on meaning rather than time.
+
+### Setup
+
+1. Install [Ollama](https://ollama.com/)
+2. Pull the embedding model:
+   ```bash
+   ollama pull qwen3-embedding:0.6b
+   ```
+3. Start Ollama:
+   ```bash
+   ollama serve
+   ```
+
+Ollama runs at `localhost:11434` by default — no further configuration needed.
+
+**If Ollama is not running**, IFS-Kiseki starts normally and falls back to recency-based memory. Sessions are still saved; embeddings are simply skipped. When you start Ollama later, new sessions will be embedded automatically.
 
 ---
 
 ## Environment Variables
 
-API keys and the Ollama host can be set via environment variables. These take precedence over config.json values.
+API keys and the Ollama host can be set via environment variables. These **always take precedence** over config.json values.
 
 ```bash
-# Copy and fill in
 cp .env.example .env
+# Edit .env with your values
 ```
 
 | Variable | Description |
@@ -192,39 +330,25 @@ cp .env.example .env
 
 ---
 
-## Embeddings (Optional)
-
-Session memory works without embeddings — sessions are saved and retrieved by recency. Embeddings enable semantic search across past sessions, surfacing relevant context even from older conversations.
-
-To enable semantic memory:
-
-1. Install [Ollama](https://ollama.com/)
-2. Pull the embedding model:
-   ```bash
-   ollama pull qwen3-embedding:0.6b
-   ```
-3. Ollama runs at `localhost:11434` by default — no further config needed
-
-If Ollama is not running, IFS-Kiseki falls back to recency-based memory retrieval.
-
----
-
 ## Crisis Safety
 
-IFS-Kiseki includes keyword-based crisis detection. When certain phrases are detected in your messages, a resource overlay appears with crisis hotline information. The overlay cannot be dismissed for 5 seconds.
+IFS-Kiseki includes keyword-based crisis detection that scans every message **before** it reaches the LLM. When crisis language is detected, a resource overlay appears with country-specific hotline information. The overlay cannot be dismissed for 5 seconds.
 
-Crisis detection is enabled by default (`crisis.enabled: true`). It can be disabled in config, but this is not recommended.
+**Supported countries:** US, GB, CA, AU, NZ, DE, FR, IN, AE — with automatic fallback to US resources.
 
-This feature is not a substitute for professional crisis support. If you are in crisis, please contact a qualified professional or emergency services.
+Crisis detection is enabled by default and **should not be disabled**. It can be turned off in config (`crisis.enabled: false`), but this is strongly discouraged.
+
+> **This feature is not a substitute for professional crisis support.** If you or someone you know is in crisis, please contact a qualified professional or emergency services immediately.
 
 ---
 
 ## Data & Privacy
 
-- All data is stored locally in `~/.config/ifs-kiseki/ifs-kiseki.db`
-- Nothing is stored on any server
-- The only outbound connections are to your configured LLM provider's API
-- Your API key is stored in `~/.config/ifs-kiseki/config.json` (permissions: 0600)
+- All data is stored locally at `~/.config/ifs-kiseki/ifs-kiseki.db`
+- Config is stored at `~/.config/ifs-kiseki/config.json` with permissions `0600`
+- The **only** outbound connections are to your configured LLM provider API and (optionally) local Ollama
+- No telemetry, no analytics, no tracking
+- Your conversations never leave your machine except as LLM API requests to the provider you chose
 
 ---
 
@@ -232,12 +356,46 @@ This feature is not a substitute for professional crisis support. If you are in 
 
 **IFS-Kiseki is not therapy and is not a substitute for professional mental health care.**
 
-It is a self-exploration tool that uses IFS-informed language and principles. It cannot diagnose, treat, or provide clinical support. If you are experiencing a mental health crisis, please contact a licensed professional or emergency services.
+It is a self-exploration tool informed by Internal Family Systems principles. It cannot diagnose, treat, or provide clinical advice. The companion is not a licensed therapist, counselor, or medical professional.
+
+For deep trauma work, complex PTSD, dissociative experiences, or any situation where you feel unsafe, please work with a [trained IFS therapist](https://ifs-institute.com/practitioners).
+
+If you are experiencing a mental health crisis, contact emergency services or a crisis hotline in your country.
 
 By using IFS-Kiseki, you acknowledge that you are using it as a personal reflection tool, not as a therapeutic intervention.
 
 ---
 
+## Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| Backend | Go (single binary, `embed.FS` for static assets) |
+| Database | SQLite + [sqlite-vec](https://github.com/asg017/sqlite-vec) (vector search) |
+| Embeddings | [Ollama](https://ollama.com/) (local, optional) |
+| Frontend | Vanilla HTML/CSS/JS (no build step, no framework) |
+| LLM Providers | Anthropic API (Claude), OpenAI-compatible API (Grok/xAI) |
+| WebSocket | [nhooyr.io/websocket](https://github.com/nhooyr/websocket) |
+
+---
+
 ## License
 
-MIT License — see [LICENSE](LICENSE)
+MIT License — see [LICENSE](LICENSE).
+
+---
+
+## Contributing
+
+Contributions are welcome. If you're interested in contributing, please:
+
+1. Open an issue to discuss the change before submitting a PR
+2. Follow the existing code style and conventions
+3. Include tests for new functionality
+4. Do not modify the IFS Protocol prompt (`internal/chat/prompt_ifs.go`) without discussion — it is carefully sourced from IFS literature
+
+---
+
+<p align="center">
+  <sub>Built with care for people who want to understand themselves better.</sub>
+</p>

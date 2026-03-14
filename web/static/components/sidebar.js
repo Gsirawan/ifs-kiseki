@@ -31,6 +31,7 @@ const Sidebar = (() => {
    */
   function init(options) {
     _onSessionLoad = (options && options.onSessionLoad) || null;
+    _fetchBriefing();
     refresh();
   }
 
@@ -65,6 +66,40 @@ const Sidebar = (() => {
     }
   }
 
+  // ── Briefing card ─────────────────────────────────────────────
+
+  /**
+   * Fetch the session briefing and display it at the top of the sidebar.
+   * Gracefully degrades: shows nothing on error or empty briefing.
+   */
+  async function _fetchBriefing() {
+    const container = document.getElementById('sidebar-briefing');
+    if (!container) return;
+
+    try {
+      const res = await fetch('/api/briefing');
+      if (!res.ok) {
+        // 503 = no provider configured — show nothing, not an error.
+        container.hidden = true;
+        return;
+      }
+      const data = await res.json();
+      const text = (data.briefing || '').trim();
+
+      if (!text) {
+        container.hidden = true;
+        return;
+      }
+
+      container.textContent = text;
+      container.hidden = false;
+    } catch (err) {
+      // Network error or unexpected failure — hide gracefully.
+      console.error('[sidebar] briefing fetch failed:', err);
+      container.hidden = true;
+    }
+  }
+
   /**
    * Set the currently active session ID (for highlighting).
    * @param {string} sessionId
@@ -89,19 +124,32 @@ const Sidebar = (() => {
     }
 
     const dateStr = _formatDate(session.started_at);
+    const duration = _formatDuration(session.started_at, session.ended_at);
     const preview = session.summary
       ? _truncate(session.summary, 50)
       : dateStr;
 
+    // Top row: date + duration
+    const metaRow = document.createElement('span');
+    metaRow.className = 'session-item-meta';
+
     const dateSpan = document.createElement('span');
     dateSpan.className = 'session-item-date';
     dateSpan.textContent = dateStr;
+    metaRow.appendChild(dateSpan);
+
+    if (duration) {
+      const durSpan = document.createElement('span');
+      durSpan.className = 'session-item-duration';
+      durSpan.textContent = duration;
+      metaRow.appendChild(durSpan);
+    }
 
     const previewSpan = document.createElement('span');
     previewSpan.className = 'session-item-preview';
     previewSpan.textContent = preview;
 
-    btn.appendChild(dateSpan);
+    btn.appendChild(metaRow);
     btn.appendChild(previewSpan);
 
     btn.addEventListener('click', () => _handleClick(session.id));
@@ -113,6 +161,14 @@ const Sidebar = (() => {
     // Highlight immediately.
     setActive(sessionId);
 
+    // Use WebSocket switch_session if available — this both loads the session
+    // for display AND makes it the active session for new messages.
+    if (typeof sendMessage === 'function' && typeof state !== 'undefined' && state.connected) {
+      const sent = sendMessage({ type: 'switch_session', session_id: sessionId });
+      if (sent) return; // session_loaded response handled by app.js
+    }
+
+    // Fallback to REST (read-only) if WebSocket is not connected.
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -136,6 +192,27 @@ const Sidebar = (() => {
       day: 'numeric',
       year: 'numeric',
     });
+  }
+
+  /**
+   * Format session duration from started_at and ended_at unix timestamps.
+   * Returns a human-readable string like "12 min", "1 hr 23 min", "< 1 min".
+   * Returns "ongoing" if ended_at is null/0, or '' if started_at is missing.
+   */
+  function _formatDuration(startedAt, endedAt) {
+    if (!startedAt) return '';
+    if (!endedAt) return 'ongoing';
+
+    const totalSec = endedAt - startedAt;
+    if (totalSec < 0) return '';
+    if (totalSec < 60) return '< 1 min';
+
+    const hours = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+
+    if (hours === 0) return mins + ' min';
+    if (mins === 0) return hours + ' hr';
+    return hours + ' hr ' + mins + ' min';
   }
 
   function _truncate(str, maxLen) {

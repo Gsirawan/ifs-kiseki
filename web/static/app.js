@@ -140,6 +140,22 @@ function handleServerMessage(msg) {
       }
       break;
 
+    case 'session_loaded':
+      state.sessionId = msg.session_id;
+      console.log(`[app] session loaded: ${state.sessionId}`);
+      // Render the loaded session's messages.
+      Chat.clearMessages();
+      if (msg.messages && msg.messages.length > 0) {
+        msg.messages.forEach(function(m) {
+          Chat.addMessage(m.role, m.content);
+        });
+      }
+      Chat.setInputEnabled(true);
+      if (typeof Sidebar !== 'undefined') {
+        Sidebar.setActive(state.sessionId);
+      }
+      break;
+
     case 'delta':
       // First delta — replace thinking indicator with streaming bubble.
       if (!state.streaming) {

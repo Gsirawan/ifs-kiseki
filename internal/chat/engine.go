@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Gsirawan/ifs-kiseki/internal/config"
 	"github.com/Gsirawan/ifs-kiseki/internal/memory"
@@ -121,6 +122,54 @@ func (e *Engine) endAndSave(sess *Session) error {
 	}()
 
 	return nil
+}
+
+// LoadedMessage is a role+content pair used when loading a past session from
+// the database into the engine. Kept separate from provider.ChatMessage to
+// avoid coupling the engine's public API to the provider wire type.
+type LoadedMessage struct {
+	Role    string
+	Content string
+}
+
+// LoadSession replaces the active session with a previously-persisted one,
+// restoring its ID, timestamps, and message history so that new messages
+// sent by the user continue in the same conversation thread.
+//
+// If a session is already active, it is ended and saved to memory first.
+func (e *Engine) LoadSession(id string, startedAtUnix int64, endedAtUnix *int64, messages []LoadedMessage) {
+	// End the current session (if any) before switching.
+	e.mu.Lock()
+	old := e.session
+	e.session = nil
+	e.mu.Unlock()
+
+	if old != nil {
+		if err := e.endAndSave(old); err != nil {
+			log.Printf("[engine] EndSession (on LoadSession): %v", err)
+		}
+	}
+
+	// Build the new session from the persisted data.
+	startedAt := time.Unix(startedAtUnix, 0)
+	msgs := make([]provider.ChatMessage, len(messages))
+	for i, m := range messages {
+		msgs[i] = provider.ChatMessage{Role: m.Role, Content: m.Content}
+	}
+
+	sess := &Session{
+		ID:        id,
+		Messages:  msgs,
+		StartedAt: startedAt,
+	}
+	if endedAtUnix != nil {
+		t := time.Unix(*endedAtUnix, 0)
+		sess.EndedAt = &t
+	}
+
+	e.mu.Lock()
+	e.session = sess
+	e.mu.Unlock()
 }
 
 // GetSession returns the current session, or nil if none exists.

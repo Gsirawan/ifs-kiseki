@@ -70,7 +70,7 @@ func (s *Server) SetupRoutes() http.Handler {
 	// Logging middleware wraps ResponseWriter and strips that interface.
 	// Solution: register the WebSocket route directly on the mux,
 	// and apply logging middleware only to non-WebSocket routes.
-	wsHandler := NewWebSocketHandler(s.engine, s.crisis)
+	wsHandler := NewWebSocketHandler(s.engine, s.db, s.crisis)
 	mux.HandleFunc("/ws", wsHandler.HandleWebSocket)
 
 	// ── Static files (SPA) ──────────────────────────────────────

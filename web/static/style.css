@@ -237,11 +237,43 @@ body {
   color: var(--text-primary);
 }
 
+/* ── Briefing card ─────────────────────────────────────────────── */
+.sidebar-briefing {
+  padding: var(--space-md);
+  margin: var(--space-sm) var(--space-sm) 0;
+  background: var(--bg-card);
+  border: 1px solid var(--accent-light);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  flex-shrink: 0;
+}
+
+/* ── Session item meta row (date + duration) ──────────────────── */
+.session-item-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: 2px;
+}
+
 .session-item-date {
-  display: block;
   font-size: var(--font-size-xs);
   color: var(--text-muted);
-  margin-bottom: 2px;
+}
+
+.session-item-duration {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.session-item-duration::before {
+  content: '·';
+  margin-right: var(--space-xs);
 }
 
 .session-item-preview {
