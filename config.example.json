@@ -6,13 +6,15 @@
       "model": "claude-sonnet-4-20250514",
       "base_url": "https://api.anthropic.com",
       "max_tokens": 4096,
-      "temperature": 0.7
+      "temperature": 0.7,
+      "api_key": ""
     },
     "grok": {
-      "model": "grok-3",
+      "model": "grok-4-1-fast-reasoning",
       "base_url": "https://api.x.ai",
       "max_tokens": 4096,
-      "temperature": 0.7
+      "temperature": 0.7,
+      "api_key": ""
     }
   },
   "embeddings": {

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -50,15 +49,7 @@ func TestDefaultConfigHasSaneValues(t *testing.T) {
 func TestSaveLoadRoundTrip(t *testing.T) {
 	// Use a temp dir to avoid touching real config.
 	tmpDir := t.TempDir()
-	origXDG := os.Getenv("XDG_CONFIG_HOME")
-	t.Setenv("XDG_CONFIG_HOME", tmpDir)
-	defer func() {
-		if origXDG != "" {
-			os.Setenv("XDG_CONFIG_HOME", origXDG)
-		} else {
-			os.Unsetenv("XDG_CONFIG_HOME")
-		}
-	}()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir) // t.Setenv handles cleanup automatically
 
 	cfg := DefaultConfig()
 	cfg.Companion.Name = "TestCompanion"

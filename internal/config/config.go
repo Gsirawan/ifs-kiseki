@@ -34,6 +34,7 @@ type ProviderEntry struct {
 	BaseURL     string  `json:"base_url"`
 	MaxTokens   int     `json:"max_tokens"`
 	Temperature float64 `json:"temperature"`
+	APIKey      string  `json:"api_key"`
 }
 
 // EmbeddingsConfig holds Ollama embedding settings.
@@ -119,7 +120,7 @@ func DefaultConfig() *Config {
 				Temperature: 0.7,
 			},
 			Grok: ProviderEntry{
-				Model:       "grok-3",
+				Model:       "grok-4-1-fast-reasoning",
 				BaseURL:     "https://api.x.ai",
 				MaxTokens:   4096,
 				Temperature: 0.7,
@@ -157,6 +158,17 @@ func DefaultConfig() *Config {
 	}
 }
 
+// ResolveAPIKeys overrides provider API keys with environment variables.
+// Env vars always take precedence over config.json values.
+func (c *Config) ResolveAPIKeys() {
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		c.Providers.Claude.APIKey = key
+	}
+	if key := os.Getenv("XAI_API_KEY"); key != "" {
+		c.Providers.Grok.APIKey = key
+	}
+}
+
 // IsFirstRun returns true if the config file does not yet exist.
 func IsFirstRun() bool {
 	_, err := os.Stat(ConfigPath())
@@ -170,7 +182,9 @@ func Load() (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DefaultConfig(), nil
+			cfg := DefaultConfig()
+			cfg.ResolveAPIKeys()
+			return cfg, nil
 		}
 		return nil, err
 	}
@@ -179,6 +193,7 @@ func Load() (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.ResolveAPIKeys()
 	return cfg, nil
 }
 
