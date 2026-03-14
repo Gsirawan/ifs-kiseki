@@ -511,12 +511,12 @@ func TestBuildSystemPromptMinimal(t *testing.T) {
 }
 
 func TestBuildSystemPromptWithUserName(t *testing.T) {
-	prompt := BuildSystemPrompt("Kira", "Ghaith", []string{"anxiety"}, "")
+	prompt := BuildSystemPrompt("Kira", "Alex", []string{"anxiety"}, "")
 
-	if !strings.Contains(prompt, "Ghaith") {
+	if !strings.Contains(prompt, "Alex") {
 		t.Error("expected prompt to contain user name")
 	}
-	if !strings.Contains(prompt, "The user's name is: Ghaith") {
+	if !strings.Contains(prompt, "The user's name is: Alex") {
 		t.Error("expected prompt to contain user name in definition section")
 	}
 }

@@ -71,9 +71,11 @@ func NewWebSocketHandler(engine *chat.Engine, db *sql.DB, crisisDetector *crisis
 // HandleWebSocket upgrades the HTTP connection to WebSocket and runs the
 // read/write loop. Each connection gets its own goroutine.
 func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Accept the WebSocket connection — allow localhost origins.
+	// Accept the WebSocket connection — allow localhost origins only.
+	// Using explicit OriginPatterns instead of InsecureSkipVerify to prevent
+	// cross-origin WebSocket hijacking if the server is bound to a non-localhost address.
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // Allow any origin (localhost dev)
+		OriginPatterns: []string{"127.0.0.1:*", "localhost:*"},
 	})
 	if err != nil {
 		log.Printf("[ws] accept failed: %v", err)

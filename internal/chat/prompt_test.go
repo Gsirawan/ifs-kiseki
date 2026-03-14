@@ -171,10 +171,10 @@ func TestBuildSystemPromptCompanionNameCustom(t *testing.T) {
 
 // TestBuildSystemPromptUserName verifies that the user name appears when set.
 func TestBuildSystemPromptUserName(t *testing.T) {
-	prompt := BuildSystemPrompt("Kira", "Ghaith", nil, "")
+	prompt := BuildSystemPrompt("Kira", "Alex", nil, "")
 
-	if !strings.Contains(prompt, "The user's name is: Ghaith") {
-		t.Error("expected prompt to contain user name 'Ghaith'")
+	if !strings.Contains(prompt, "The user's name is: Alex") {
+		t.Error("expected prompt to contain user name 'Alex'")
 	}
 }
 
@@ -293,7 +293,7 @@ func TestBuildSystemPromptMinimalConfig(t *testing.T) {
 func TestBuildSystemPromptFullConfig(t *testing.T) {
 	prompt := BuildSystemPrompt(
 		"Aria",
-		"Ghaith",
+		"Alex",
 		[]string{"anxiety", "perfectionism", "inner critic"},
 		"Always end sessions with a grounding exercise.",
 	)
@@ -304,7 +304,7 @@ func TestBuildSystemPromptFullConfig(t *testing.T) {
 	}{
 		{"IFS protocol marker", "[IFS PROTOCOL — DO NOT MODIFY]"},
 		{"companion name", "Your name is: Aria"},
-		{"user name", "The user's name is: Ghaith"},
+		{"user name", "The user's name is: Alex"},
 		{"focus area anxiety", "anxiety"},
 		{"focus area perfectionism", "perfectionism"},
 		{"focus area inner critic", "inner critic"},
