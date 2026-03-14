@@ -157,6 +157,17 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Save the active chat session synchronously before shutting down the
+	// HTTP server. This MUST happen before Shutdown() because Shutdown()
+	// closes listeners and drains connections — after that, the database
+	// may be closed by the deferred database.Close(). The save blocks until
+	// complete (no goroutine) so we don't lose messages on Ctrl+C / SIGTERM.
+	if engine != nil {
+		if err := engine.EndSessionSync(ctx); err != nil {
+			log.Printf("WARNING: failed to save active session on shutdown: %v", err)
+		}
+	}
+
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Fatalf("shutdown error: %v", err)
 	}

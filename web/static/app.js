@@ -247,35 +247,137 @@ function setConnectionStatus(status) {
 // ── Router ───────────────────────────────────────────────────────
 
 /**
- * Navigate to a named view. Updates hash, active nav button, and visible view.
+ * Navigate to a named view. Settings is now a slide-in panel,
+ * not a separate view — use toggleSettingsPanel() for that.
  * @param {'chat'|'settings'} route
  */
 function navigate(route) {
-  const validRoutes = ['chat', 'settings'];
-  if (!validRoutes.includes(route)) route = 'chat';
+  // If navigating to settings, open the panel instead of swapping views.
+  if (route === 'settings') {
+    openSettingsPanel();
+    return;
+  }
+
+  // Default to chat for any unknown route.
+  route = 'chat';
 
   // Update hash without triggering hashchange loop.
   if (location.hash !== `#${route}`) {
     history.replaceState(null, '', `#${route}`);
   }
 
-  // Show/hide views.
-  document.querySelectorAll('.view').forEach((el) => {
-    const isTarget = el.dataset.view === route;
-    el.hidden = !isTarget;
-    el.classList.toggle('view-active', isTarget);
-  });
+  // Ensure chat view is visible (it should always be visible now).
+  const chatView = document.getElementById('chat-container');
+  if (chatView) {
+    chatView.hidden = false;
+    chatView.classList.add('view-active');
+  }
 
-  // Update nav button active state.
-  document.querySelectorAll('.nav-btn').forEach((btn) => {
-    const isActive = btn.dataset.route === route;
-    btn.classList.toggle('nav-btn-active', isActive);
-    btn.setAttribute('aria-current', isActive ? 'page' : 'false');
-  });
+  // Update nav button active state — chat is always the active page.
+  const chatBtn = document.querySelector('.nav-btn[data-route="chat"]');
+  if (chatBtn) {
+    chatBtn.classList.add('nav-btn-active');
+    chatBtn.setAttribute('aria-current', 'page');
+  }
 
-  // Lazy-render settings page on first visit.
-  if (route === 'settings' && typeof Settings !== 'undefined') {
+  // Close settings panel if open when navigating to chat.
+  closeSettingsPanel();
+}
+
+// ── Settings panel ───────────────────────────────────────────────
+
+/**
+ * Toggle the settings panel open/closed.
+ * When closing, auto-saves settings.
+ */
+function toggleSettingsPanel() {
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+
+  const isOpen = panel.classList.contains('settings-panel--open');
+  if (isOpen) {
+    closeSettingsPanel();
+  } else {
+    openSettingsPanel();
+  }
+}
+
+/**
+ * Open the settings panel. Lazy-renders settings on first open.
+ */
+function openSettingsPanel() {
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+
+  // Already open — do nothing.
+  if (panel.classList.contains('settings-panel--open')) return;
+
+  // Show the panel element, then trigger the slide-in on next frame.
+  panel.hidden = false;
+  panel.removeAttribute('hidden');
+
+  // Force a reflow so the CSS transition plays from the collapsed state.
+  void panel.offsetHeight;
+
+  panel.classList.add('settings-panel--open');
+
+  // Update hash.
+  if (location.hash !== '#settings') {
+    history.replaceState(null, '', '#settings');
+  }
+
+  // Highlight the settings nav button.
+  const settingsBtn = document.querySelector('.nav-btn[data-route="settings"]');
+  if (settingsBtn) {
+    settingsBtn.classList.add('nav-btn-active');
+    settingsBtn.setAttribute('aria-current', 'true');
+  }
+
+  // Lazy-render settings content on first open.
+  if (typeof Settings !== 'undefined') {
     Settings.render();
+  }
+}
+
+/**
+ * Close the settings panel and auto-save settings.
+ */
+function closeSettingsPanel() {
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+
+  // Not open — do nothing.
+  if (!panel.classList.contains('settings-panel--open')) return;
+
+  // Auto-save before closing.
+  if (typeof Settings !== 'undefined' && typeof Settings.save === 'function') {
+    Settings.save();
+  }
+
+  // Slide out.
+  panel.classList.remove('settings-panel--open');
+
+  // After transition ends, hide the element from the DOM flow.
+  function onTransitionEnd(e) {
+    // Only react to the transform transition on the panel itself.
+    if (e.target !== panel) return;
+    panel.removeEventListener('transitionend', onTransitionEnd);
+    if (!panel.classList.contains('settings-panel--open')) {
+      panel.hidden = true;
+    }
+  }
+  panel.addEventListener('transitionend', onTransitionEnd);
+
+  // Remove settings nav button highlight.
+  const settingsBtn = document.querySelector('.nav-btn[data-route="settings"]');
+  if (settingsBtn) {
+    settingsBtn.classList.remove('nav-btn-active');
+    settingsBtn.setAttribute('aria-current', 'false');
+  }
+
+  // Update hash back to chat.
+  if (location.hash === '#settings') {
+    history.replaceState(null, '', '#chat');
   }
 }
 
@@ -338,13 +440,25 @@ function _startApp() {
         }
         navigate('chat');
       },
+      onNewSession: requestNewSession,
     });
   }
 
   // Wire nav buttons.
   document.querySelectorAll('.nav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => navigate(btn.dataset.route));
+    if (btn.dataset.route === 'settings') {
+      // Settings button toggles the panel instead of navigating.
+      btn.addEventListener('click', toggleSettingsPanel);
+    } else {
+      btn.addEventListener('click', () => navigate(btn.dataset.route));
+    }
   });
+
+  // Wire settings panel close button.
+  const settingsCloseBtn = document.getElementById('settings-panel-close');
+  if (settingsCloseBtn) {
+    settingsCloseBtn.addEventListener('click', closeSettingsPanel);
+  }
 
   // Wire sidebar toggle.
   const sidebarToggle = document.getElementById('sidebar-toggle');

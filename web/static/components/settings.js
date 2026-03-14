@@ -25,6 +25,7 @@ const Settings = (() => {
 
   let _redactedKeys = { claude: '', grok: '' };
   let _rendered = false;
+  let _originalSettings = null;  // cached settings for auto-save on panel close
 
   // ── Public API ─────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ const Settings = (() => {
       _redactedKeys.claude = settings.providers?.claude?.api_key || '';
       _redactedKeys.grok   = settings.providers?.grok?.api_key   || '';
 
+      _originalSettings = settings;
       container.innerHTML = '';
       container.appendChild(_buildPage(settings, providers, health));
       _rendered = true;
@@ -83,12 +85,6 @@ const Settings = (() => {
   function _buildPage(settings, providers, health) {
     const page = document.createElement('div');
     page.className = 'settings-placeholder';
-    page.style.overflowY = 'auto';
-    page.style.maxHeight = '100%';
-
-    const title = document.createElement('h2');
-    title.textContent = 'Settings';
-    page.appendChild(title);
 
     const form = document.createElement('form');
     form.id = 'settings-form';
@@ -141,12 +137,28 @@ const Settings = (() => {
       claudeHasKey ? `Key configured (${_redactedKeys.claude}). Enter a new key to replace.` : 'No key set.'
     ));
 
+    // Claude model
+    const claudeCurrentModel = settings.providers?.claude?.model || '';
+    section.appendChild(_field(
+      'Claude Model',
+      _textInputWithPlaceholder('setting-claude-model', claudeCurrentModel, 'claude-sonnet-4-20250514'),
+      'Enter the model name to use. Check your provider\'s documentation for available models.'
+    ));
+
     // Grok key
     const grokHasKey = providers.find(p => p.name === 'grok')?.has_key;
     section.appendChild(_field(
       'Grok API Key',
       _passwordInput('setting-grok-apikey', grokHasKey ? _redactedKeys.grok : 'xai-…'),
       grokHasKey ? `Key configured (${_redactedKeys.grok}). Enter a new key to replace.` : 'No key set.'
+    ));
+
+    // Grok model
+    const grokCurrentModel = settings.providers?.grok?.model || '';
+    section.appendChild(_field(
+      'Grok Model',
+      _textInputWithPlaceholder('setting-grok-model', grokCurrentModel, 'grok-3'),
+      'Enter the model name to use. Check your provider\'s documentation for available models.'
     ));
 
     return section;
@@ -256,8 +268,8 @@ const Settings = (() => {
       version: original.version || 1,
       provider: get('setting-provider') || original.provider || 'claude',
       providers: {
-        claude: { ...(original.providers?.claude || {}), api_key: resolveKey('setting-claude-apikey', 'claude') },
-        grok:   { ...(original.providers?.grok || {}),   api_key: resolveKey('setting-grok-apikey', 'grok') },
+        claude: { ...(original.providers?.claude || {}), api_key: resolveKey('setting-claude-apikey', 'claude'), model: get('setting-claude-model') || original.providers?.claude?.model || 'claude-sonnet-4-20250514' },
+        grok:   { ...(original.providers?.grok || {}),   api_key: resolveKey('setting-grok-apikey', 'grok'),     model: get('setting-grok-model')   || original.providers?.grok?.model   || 'grok-3' },
       },
       embeddings: original.embeddings || {},
       server: original.server || {},
@@ -331,6 +343,16 @@ const Settings = (() => {
     return input;
   }
 
+  function _textInputWithPlaceholder(id, value, placeholder) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = id;
+    input.value = value;
+    input.placeholder = placeholder;
+    _styleInput(input);
+    return input;
+  }
+
   function _passwordInput(id, placeholder) {
     const input = document.createElement('input');
     input.type = 'password'; input.id = id; input.placeholder = placeholder;
@@ -382,8 +404,22 @@ const Settings = (() => {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  // ── Public save (called by app.js on panel close) ──────────────
+
+  /**
+   * Trigger a save of the current settings form values.
+   * Called externally when the settings panel is closed (auto-save).
+   * No-op if settings have not been rendered yet.
+   */
+  function save() {
+    if (!_rendered || !_originalSettings) return;
+    const form = document.getElementById('settings-form');
+    if (!form) return;
+    _handleSave(form, _originalSettings);
+  }
+
   // ── Expose ─────────────────────────────────────────────────────
 
-  return { render };
+  return { render, save };
 
 })();

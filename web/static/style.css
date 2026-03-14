@@ -172,6 +172,7 @@ body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative; /* anchor for settings panel overlay */
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
@@ -281,6 +282,178 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Session item delete button ───────────────────────────────── */
+.session-item-delete {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast),
+              background var(--transition-fast);
+}
+
+.session-item:hover .session-item-delete,
+.session-item-delete:focus-visible {
+  opacity: 1;
+}
+
+.session-item-delete:hover {
+  color: var(--status-error);
+  background: rgba(184, 92, 92, 0.1);
+}
+
+.session-item-delete:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* ── Delete confirmation modal ────────────────────────────────── */
+.delete-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-md);
+  animation: fadeIn var(--transition-fast) ease both;
+}
+
+.delete-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.delete-confirm-panel {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-xl) var(--space-2xl);
+  max-width: 380px;
+  width: 100%;
+  box-shadow: var(--shadow-md);
+  animation: deleteConfirmSlideIn var(--transition-med) ease both;
+}
+
+@keyframes deleteConfirmSlideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.delete-confirm-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-sm);
+  text-align: center;
+}
+
+.delete-confirm-message {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.55;
+  text-align: center;
+  margin-bottom: var(--space-xl);
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: var(--space-sm);
+  justify-content: center;
+}
+
+.delete-confirm-btn {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+              transform var(--transition-fast);
+  min-width: 90px;
+}
+
+.delete-confirm-btn:active {
+  transform: scale(0.97);
+}
+
+.delete-confirm-btn--cancel {
+  background: var(--bg-sidebar);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+.delete-confirm-btn--cancel:hover {
+  background: var(--bg-navbar);
+}
+
+.delete-confirm-btn--delete {
+  background: var(--status-error);
+  color: var(--text-inverse);
+}
+
+.delete-confirm-btn--delete:hover {
+  background: #a04e4e;
+}
+
+[data-theme="dark"] .delete-confirm-btn--delete:hover {
+  background: #c06868;
+}
+
+/* ── Delete error toast ───────────────────────────────────────── */
+.delete-error-toast {
+  position: fixed;
+  bottom: var(--space-xl);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9500;
+  background: #fdf0f0;
+  border: 1px solid #e8c0c0;
+  color: var(--status-error);
+  padding: var(--space-sm) var(--space-lg);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  box-shadow: var(--shadow-md);
+  animation: fadeSlideIn var(--transition-med) ease both;
+}
+
+[data-theme="dark"] .delete-error-toast {
+  background: #2a1a1a;
+  border-color: #5a2a2a;
+}
+
+.delete-error-toast--fading {
+  opacity: 0;
+  transition: opacity 300ms ease;
 }
 
 /* ── Main content ─────────────────────────────────────────────── */
@@ -547,22 +720,104 @@ body {
   margin-top: var(--space-xs);
 }
 
-/* ── Settings placeholder ─────────────────────────────────────── */
+/* ── Settings panel (slide-in from right) ─────────────────────── */
+.settings-panel {
+  width: 400px;
+  max-width: 100vw;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  z-index: 60;
+  box-shadow: -4px 0 16px rgba(44, 36, 32, 0.12);
+
+  /* Position: overlay on right edge of #layout */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+
+  /* Slide-in animation — starts off-screen to the right */
+  transform: translateX(100%);
+  opacity: 0;
+  transition: transform 200ms ease, opacity 150ms ease;
+}
+
+/* Hidden state — fully removed from rendering */
+.settings-panel[hidden] {
+  display: none !important;
+}
+
+/* Open state — slid into view */
+.settings-panel.settings-panel--open {
+  transform: translateX(0);
+  opacity: 1;
+  display: flex;
+}
+
+/* Panel header with title and close button */
+.settings-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-navbar);
+}
+
+.settings-panel-title {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.settings-panel-close {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: var(--space-xs) var(--space-sm);
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.settings-panel-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-page);
+  border-color: var(--border);
+}
+
+/* Scrollable body */
+.settings-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── Settings placeholder (inside panel body) ─────────────────── */
 .settings-placeholder {
-  padding: var(--space-2xl);
-  max-width: 600px;
-  margin: 0 auto;
+  padding: var(--space-lg) var(--space-lg) var(--space-2xl);
+  max-width: 100%;
+  margin: 0;
 }
 
 .settings-placeholder h2 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin-bottom: var(--space-md);
-  color: var(--text-primary);
+  /* Title is now in the panel header — hide the form's h2 */
+  display: none;
 }
 
 .settings-placeholder p {
   color: var(--text-secondary);
+}
+
+[data-theme="dark"] .settings-panel {
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
 }
 
 /* ── Buttons ──────────────────────────────────────────────────── */
@@ -1261,7 +1516,7 @@ body {
   }
 }
 
-/* ── Responsive — sidebar collapses on narrow screens ─────────── */
+/* ── Responsive — sidebar & settings panel on narrow screens ──── */
 @media (max-width: 640px) {
   #sidebar {
     position: absolute;
@@ -1275,6 +1530,13 @@ body {
   #sidebar.collapsed {
     width: 0;
     opacity: 0;
+  }
+
+  /* Settings panel overlays full width on mobile */
+  .settings-panel {
+    width: 100vw;
+    right: 0;
+    z-index: 70;
   }
 
   .message {

@@ -43,17 +43,23 @@
         </div>
       </aside>
 
+      <!-- Settings panel (slides in from left) -->
+      <aside id="settings-panel" class="settings-panel" aria-label="Settings" hidden>
+        <div class="settings-panel-header">
+          <h2 class="settings-panel-title">Settings</h2>
+          <button id="settings-panel-close" class="settings-panel-close" aria-label="Close settings">&times;</button>
+        </div>
+        <div id="settings-container" class="settings-panel-body">
+          <!-- Populated by components/settings.js -->
+        </div>
+      </aside>
+
       <!-- Main content area -->
       <main id="main-content" role="main">
 
-        <!-- Chat view -->
+        <!-- Chat view (always visible) -->
         <div id="chat-container" class="view view-active" data-view="chat" aria-label="Chat with your IFS companion">
           <!-- Populated by components/chat.js -->
-        </div>
-
-        <!-- Settings view -->
-        <div id="settings-container" class="view" data-view="settings" aria-label="Settings" hidden>
-          <!-- Populated by components/settings.js -->
         </div>
 
       </main>
