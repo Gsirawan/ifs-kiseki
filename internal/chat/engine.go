@@ -36,20 +36,26 @@ func NewEngine(p provider.Provider, cfg *config.Config, memoryStore memory.Store
 }
 
 // NewSession creates a new chat session and returns its ID.
-// If a session is already active, it is ended and saved to memory before
-// the new session begins.
+// If a session is already active, it is ended and saved to memory
+// synchronously before the new session begins. Synchronous saving ensures
+// the session is in the database before the caller (e.g. WebSocket handler)
+// sends a response — so sidebar refresh finds it immediately.
 func (e *Engine) NewSession() string {
 	// Capture and clear the old session under the write lock, then release
-	// before calling EndSession — EndSession acquires the lock internally and
-	// we must not hold it while doing I/O.
+	// before calling save — save acquires the session lock internally and
+	// we must not hold the engine lock while doing I/O.
 	e.mu.Lock()
 	old := e.session
 	e.session = nil
 	e.mu.Unlock()
 
-	// Save the old session outside the lock.
+	// Save the old session synchronously — this blocks until the SQLite write
+	// completes (~100ms). The async variant caused a race condition: the client
+	// would refresh the sidebar before the save goroutine finished writing.
 	if old != nil {
-		if err := e.endAndSave(old); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := e.endAndSaveSync(ctx, old); err != nil {
 			log.Printf("[engine] EndSession (on NewSession): %v", err)
 		}
 	}
