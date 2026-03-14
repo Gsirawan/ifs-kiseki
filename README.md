@@ -104,6 +104,12 @@ The server starts at `http://127.0.0.1:3737` and opens your browser automaticall
 ## Screenshots
 
 <p align="center">
+  <img src="assets/ifs-kiseki-demo.gif" alt="IFS-Kiseki Demo — session briefing and chat interface" width="100%">
+  <br>
+  <sub>Session briefing with IFS-informed context from past conversations.</sub>
+</p>
+
+<p align="center">
   <img src="assets/ifs-kiseki-chat.png" alt="IFS-Kiseki Chat Interface" width="100%">
   <br>
   <sub>The chat interface — warm, grounding, and therapy-appropriate.</sub>
