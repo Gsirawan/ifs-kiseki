@@ -39,7 +39,7 @@ The companion is grounded in IFS principles: it speaks in parts language, guides
 
 🔒 **Privacy-First** — All data stays on your machine in a local SQLite database. The only outbound connections are to the LLM provider API you configure. Config files are stored with restrictive permissions (0600).
 
-🎨 **Warm, Therapy-Appropriate UI** — A clean web interface with dark mode support, designed to feel safe and grounding — not clinical, not flashy.
+🎨 **Warm, Appropriate UI** — A clean web interface with dark mode support, designed to feel safe and grounding — not clinical, not flashy.
 
 📋 **Session History** — Browse past sessions in the sidebar, resume previous conversations, and track your exploration over time.
 
