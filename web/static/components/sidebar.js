@@ -5,6 +5,7 @@
  *   - Fetch and display past sessions in the sidebar
  *   - Handle session click to load messages
  *   - Highlight the active session
+ *   - Delete sessions with confirmation
  *
  * Exposed as a global `Sidebar` object (vanilla JS, no module system).
  * app.js calls Sidebar.init() and Sidebar.refresh().
@@ -12,6 +13,7 @@
  * API used:
  *   GET /api/sessions          → sessionRow[]
  *   GET /api/sessions/{id}     → sessionDetail (with messages[])
+ *   DELETE /api/sessions/{id}  → {"status":"deleted"}
  */
 
 'use strict';
@@ -21,7 +23,9 @@ const Sidebar = (() => {
   // ── Private state ──────────────────────────────────────────────
 
   let _onSessionLoad = null;       // callback(sessionDetail) when user clicks a session
+  let _onNewSession = null;        // callback() to start a new session after deleting the active one
   let _currentSessionId = null;    // highlighted session id
+  let _confirmOverlay = null;      // active delete-confirmation overlay (null when not shown)
 
   // ── Public API ─────────────────────────────────────────────────
 
@@ -31,6 +35,7 @@ const Sidebar = (() => {
    */
   function init(options) {
     _onSessionLoad = (options && options.onSessionLoad) || null;
+    _onNewSession = (options && options.onNewSession) || null;
     _fetchBriefing();
     refresh();
   }
@@ -129,7 +134,7 @@ const Sidebar = (() => {
       ? _truncate(session.summary, 50)
       : dateStr;
 
-    // Top row: date + duration
+    // Top row: date + duration + delete button
     const metaRow = document.createElement('span');
     metaRow.className = 'session-item-meta';
 
@@ -144,6 +149,26 @@ const Sidebar = (() => {
       durSpan.textContent = duration;
       metaRow.appendChild(durSpan);
     }
+
+    // Delete button — visible on hover only (CSS handles visibility).
+    const deleteBtn = document.createElement('span');
+    deleteBtn.className = 'session-item-delete';
+    deleteBtn.setAttribute('role', 'button');
+    deleteBtn.setAttribute('aria-label', 'Delete session');
+    deleteBtn.setAttribute('tabindex', '0');
+    deleteBtn.textContent = '×';
+    deleteBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't trigger session load
+      _showDeleteConfirm(session.id);
+    });
+    deleteBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        _showDeleteConfirm(session.id);
+      }
+    });
+    metaRow.appendChild(deleteBtn);
 
     const previewSpan = document.createElement('span');
     previewSpan.className = 'session-item-preview';
@@ -180,6 +205,143 @@ const Sidebar = (() => {
     } catch (err) {
       console.error('[sidebar] failed to load session:', err);
     }
+  }
+
+  // ── Delete confirmation ─────────────────────────────────────────
+
+  /**
+   * Show a styled confirmation modal before deleting a session.
+   * This is a therapy app — accidental deletion of session history would be harmful.
+   * @param {string} sessionId
+   */
+  function _showDeleteConfirm(sessionId) {
+    // Prevent stacking multiple confirm dialogs.
+    _dismissDeleteConfirm();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'delete-confirm-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'delete-confirm-title');
+
+    overlay.innerHTML = `
+      <div class="delete-confirm-backdrop" aria-hidden="true"></div>
+      <div class="delete-confirm-panel">
+        <p id="delete-confirm-title" class="delete-confirm-title">Delete this session?</p>
+        <p class="delete-confirm-message">This cannot be undone. All messages in this session will be permanently removed.</p>
+        <div class="delete-confirm-actions">
+          <button class="delete-confirm-btn delete-confirm-btn--cancel" data-action="cancel">Cancel</button>
+          <button class="delete-confirm-btn delete-confirm-btn--delete" data-action="delete">Delete</button>
+        </div>
+      </div>
+    `;
+
+    // Wire button handlers.
+    overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+      _dismissDeleteConfirm();
+    });
+    overlay.querySelector('[data-action="delete"]').addEventListener('click', () => {
+      _dismissDeleteConfirm();
+      _executeDelete(sessionId);
+    });
+
+    // Close on backdrop click.
+    overlay.querySelector('.delete-confirm-backdrop').addEventListener('click', () => {
+      _dismissDeleteConfirm();
+    });
+
+    // Close on Escape key.
+    function handleEscape(e) {
+      if (e.key === 'Escape') {
+        _dismissDeleteConfirm();
+        document.removeEventListener('keydown', handleEscape);
+      }
+    }
+    document.addEventListener('keydown', handleEscape);
+
+    // Store reference for cleanup and attach the escape handler to the overlay
+    // so _dismissDeleteConfirm can remove it.
+    overlay._escapeHandler = handleEscape;
+
+    document.body.appendChild(overlay);
+    _confirmOverlay = overlay;
+
+    // Focus the cancel button (safe default — don't make delete the easy path).
+    overlay.querySelector('[data-action="cancel"]').focus();
+  }
+
+  /**
+   * Remove the delete confirmation overlay if present.
+   */
+  function _dismissDeleteConfirm() {
+    if (_confirmOverlay) {
+      if (_confirmOverlay._escapeHandler) {
+        document.removeEventListener('keydown', _confirmOverlay._escapeHandler);
+      }
+      _confirmOverlay.remove();
+      _confirmOverlay = null;
+    }
+  }
+
+  /**
+   * Execute the session deletion via the REST API.
+   * On success: remove the item from the list and handle active-session cleanup.
+   * On failure: show a brief error message.
+   * @param {string} sessionId
+   */
+  async function _executeDelete(sessionId) {
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+
+      // If the deleted session was the currently active one, start a new session.
+      const wasActive = (sessionId === _currentSessionId);
+      if (wasActive) {
+        _currentSessionId = null;
+        if (typeof _onNewSession === 'function') {
+          _onNewSession();
+        } else if (typeof requestNewSession === 'function') {
+          // Fallback to the global function from app.js.
+          requestNewSession();
+        }
+      }
+
+      // Refresh the session list to reflect the deletion.
+      refresh();
+    } catch (err) {
+      console.error('[sidebar] failed to delete session:', err);
+      _showDeleteError(err.message || 'Could not delete session.');
+    }
+  }
+
+  /**
+   * Show a brief, auto-dismissing error toast when deletion fails.
+   * @param {string} message
+   */
+  function _showDeleteError(message) {
+    // Remove any existing error toast.
+    const existing = document.getElementById('sidebar-delete-error');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'sidebar-delete-error';
+    toast.className = 'delete-error-toast';
+    toast.setAttribute('role', 'alert');
+    toast.textContent = message;
+
+    document.body.appendChild(toast);
+
+    // Auto-dismiss after 4 seconds.
+    setTimeout(() => {
+      toast.classList.add('delete-error-toast--fading');
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
   }
 
   // ── Formatting helpers ─────────────────────────────────────────

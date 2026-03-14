@@ -77,25 +77,79 @@ func (e *Engine) EndSession() error {
 	return e.endAndSave(sess)
 }
 
+// EndSessionSync ends the current session and synchronously saves it to memory.
+// Blocks until the save completes or the context is cancelled. Use this during
+// graceful shutdown when the process is about to exit — async goroutines would
+// be killed before completing.
+// Returns nil if there is no active session, no memory store, or no messages to save.
+func (e *Engine) EndSessionSync(ctx context.Context) error {
+	e.mu.Lock()
+	sess := e.session
+	e.mu.Unlock()
+
+	if sess == nil || e.memoryStore == nil {
+		return nil
+	}
+
+	return e.endAndSaveSync(ctx, sess)
+}
+
 // endAndSave marks the session as ended and fires an async goroutine to persist
 // it. The goroutine uses context.Background() because the caller's context
 // (e.g. the WebSocket request context) may already be cancelled at this point.
 // Respects config.Memory.AutoSave — if false, the session is ended but not saved.
 func (e *Engine) endAndSave(sess *Session) error {
+	memSess, ok := e.snapshotSession(sess)
+	if !ok {
+		return nil
+	}
+
+	store := e.memoryStore // capture for goroutine
+
+	go func() {
+		ctx := context.Background()
+		if err := store.SaveSession(ctx, memSess); err != nil {
+			log.Printf("[engine] async SaveSession failed (session %s): %v", memSess.ID, err)
+			return
+		}
+		log.Printf("[engine] session %s saved to memory (%d messages)", memSess.ID, len(memSess.Messages))
+	}()
+
+	return nil
+}
+
+// endAndSaveSync is the synchronous variant of endAndSave. It blocks until
+// SaveSession completes or the context is cancelled. Used during shutdown.
+func (e *Engine) endAndSaveSync(ctx context.Context, sess *Session) error {
+	memSess, ok := e.snapshotSession(sess)
+	if !ok {
+		return nil
+	}
+
+	if err := e.memoryStore.SaveSession(ctx, memSess); err != nil {
+		return fmt.Errorf("sync SaveSession failed (session %s): %w", memSess.ID, err)
+	}
+	log.Printf("[engine] session %s saved to memory synchronously (%d messages)", memSess.ID, len(memSess.Messages))
+	return nil
+}
+
+// snapshotSession marks the session as ended and creates a memory.Session
+// snapshot suitable for persistence. Returns false if the session should not
+// be saved (no memory store, auto_save disabled, or no messages).
+func (e *Engine) snapshotSession(sess *Session) (memory.Session, bool) {
 	// Mark the session as ended (idempotent — End() only sets EndedAt once).
 	sess.End()
 
 	if e.memoryStore == nil {
-		return nil
+		return memory.Session{}, false
 	}
 
 	// Respect the auto_save config flag.
 	if e.config != nil && !e.config.Memory.AutoSave {
-		return nil
+		return memory.Session{}, false
 	}
 
-	// Snapshot the session data under its own lock before handing off to the
-	// goroutine — avoids any race if the session is somehow reused.
+	// Snapshot the session data under its own lock before handing off.
 	sess.mu.Lock()
 	msgs := make([]provider.ChatMessage, len(sess.Messages))
 	copy(msgs, sess.Messages)
@@ -110,18 +164,12 @@ func (e *Engine) endAndSave(sess *Session) error {
 	memSess.Summary = sess.Summary
 	sess.mu.Unlock()
 
-	store := e.memoryStore // capture for goroutine
+	// Nothing to save if there are no messages.
+	if len(memSess.Messages) == 0 {
+		return memory.Session{}, false
+	}
 
-	go func() {
-		ctx := context.Background()
-		if err := store.SaveSession(ctx, memSess); err != nil {
-			log.Printf("[engine] async SaveSession failed (session %s): %v", memSess.ID, err)
-			return
-		}
-		log.Printf("[engine] session %s saved to memory (%d messages)", memSess.ID, len(memSess.Messages))
-	}()
-
-	return nil
+	return memSess, true
 }
 
 // LoadedMessage is a role+content pair used when loading a past session from

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -50,11 +51,22 @@ type wsUsage struct {
 
 // ── Handler ─────────────────────────────────────────────────────
 
+// wsDisconnectDelay is the time to wait after a WebSocket disconnect before
+// saving the session. This prevents premature saves when the user refreshes
+// the page or the browser briefly reconnects (e.g. tab switch on mobile).
+const wsDisconnectDelay = 2 * time.Second
+
 // WebSocketHandler manages WebSocket connections for chat streaming.
 type WebSocketHandler struct {
 	engine *chat.Engine
 	db     *sql.DB
 	crisis *crisis.RegexCrisisDetector // may be nil — crisis detection optional
+
+	// connMu protects connCount. Used to detect whether a new WebSocket
+	// connection arrived during the disconnect delay, indicating a page
+	// refresh rather than a real close.
+	connMu    sync.Mutex
+	connCount int
 }
 
 // NewWebSocketHandler creates a WebSocket handler backed by the chat engine.
@@ -81,6 +93,12 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "connection closed")
 
+	// Track connection count so we can detect reconnects (page refresh).
+	h.connMu.Lock()
+	h.connCount++
+	countAtConnect := h.connCount
+	h.connMu.Unlock()
+
 	log.Printf("[ws] client connected from %s", r.RemoteAddr)
 
 	// Check that engine is available.
@@ -106,8 +124,31 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	log.Printf("[ws] client disconnected from %s", r.RemoteAddr)
 
-	// Save the session to memory on disconnect. This is async inside EndSession —
-	// it fires a goroutine and returns immediately so we don't block shutdown.
+	// Save the session after a short delay. The delay prevents premature saves
+	// when the user refreshes the page — a refresh causes disconnect + reconnect
+	// within ~1s. If a new connection arrives during the delay, we skip the save
+	// because the session is still active.
+	go h.debouncedSave(countAtConnect)
+}
+
+// debouncedSave waits briefly after a WebSocket disconnect, then saves the
+// active session — but only if no new connection has arrived in the meantime.
+// This prevents saving (and marking EndedAt) on page refreshes.
+func (h *WebSocketHandler) debouncedSave(countAtDisconnect int) {
+	time.Sleep(wsDisconnectDelay)
+
+	h.connMu.Lock()
+	currentCount := h.connCount
+	h.connMu.Unlock()
+
+	if currentCount != countAtDisconnect {
+		// A new connection arrived during the delay — this was likely a page
+		// refresh, not a real close. Skip the save.
+		log.Printf("[ws] skipping disconnect save — new connection detected (reconnect/refresh)")
+		return
+	}
+
+	// No reconnect happened — the user really closed the tab. Save the session.
 	if err := h.engine.EndSession(); err != nil {
 		log.Printf("[ws] EndSession on disconnect: %v", err)
 	}
