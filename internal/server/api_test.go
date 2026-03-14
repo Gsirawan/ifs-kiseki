@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,9 +13,12 @@ import (
 
 	"github.com/Gsirawan/ifs-kiseki/internal/config"
 	"github.com/Gsirawan/ifs-kiseki/internal/db"
+	"github.com/Gsirawan/ifs-kiseki/internal/memory"
+	"github.com/Gsirawan/ifs-kiseki/internal/provider"
 )
 
 // testServer creates a Server backed by a temp SQLite DB and default config.
+// memoryStore and provider are both nil — tests that need them set them directly.
 func testServer(t *testing.T) (*Server, *sql.DB) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -28,8 +33,40 @@ func testServer(t *testing.T) (*Server, *sql.DB) {
 	cfg.Providers.Claude.APIKey = "sk-ant-test-key-1234567890abcdef"
 	cfg.Providers.Grok.APIKey = "xai-test-key-abcdef1234567890"
 
-	srv := NewServer(database, cfg, http.Dir("."), nil)
+	srv := NewServer(database, cfg, http.Dir("."), nil, nil, nil, nil)
 	return srv, database
+}
+
+// ── Briefing test helpers ────────────────────────────────────────
+
+// mockMemoryStore is a minimal memory.Store for briefing tests.
+type mockMemoryStore struct {
+	briefing string
+	err      error
+}
+
+func (m *mockMemoryStore) SaveSession(_ context.Context, _ memory.Session) error {
+	return nil
+}
+
+func (m *mockMemoryStore) Search(_ context.Context, _ string, _ int) ([]memory.Result, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) GenerateBriefing(_ context.Context, _ provider.Provider) (string, error) {
+	return m.briefing, m.err
+}
+
+// mockProvider is a minimal provider.Provider for briefing tests.
+type mockProvider struct{}
+
+func (m *mockProvider) Name() string     { return "mock" }
+func (m *mockProvider) Models() []string { return []string{"mock-model"} }
+func (m *mockProvider) StreamChat(_ context.Context, _ provider.ChatRequest) (<-chan provider.StreamEvent, error) {
+	ch := make(chan provider.StreamEvent, 1)
+	ch <- provider.StreamEvent{Type: "done"}
+	close(ch)
+	return ch, nil
 }
 
 // doRequest performs a request against the test server's mux and returns the response.
@@ -373,5 +410,326 @@ func TestContentTypeJSON(t *testing.T) {
 	ct := rr.Header().Get("Content-Type")
 	if ct != "application/json" {
 		t.Errorf("expected Content-Type=application/json, got %q", ct)
+	}
+}
+
+// ── Briefing endpoint tests ──────────────────────────────────────
+
+// TestBriefingNoMemory verifies that GET /api/briefing returns a welcome
+// message when no memory store is configured (nil memoryStore).
+func TestBriefingNoMemory(t *testing.T) {
+	srv, _ := testServer(t) // memoryStore is nil
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "GET", "/api/briefing", "")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp briefingResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Briefing == "" {
+		t.Error("expected non-empty briefing in welcome response")
+	}
+	// Should be the static welcome message — no LLM call.
+	if resp.Briefing != "Welcome! This is your first session." {
+		t.Errorf("expected static welcome message, got %q", resp.Briefing)
+	}
+}
+
+// TestBriefingNoProvider verifies that GET /api/briefing returns 503 when
+// a memory store exists but no LLM provider is configured.
+func TestBriefingNoProvider(t *testing.T) {
+	srv, _ := testServer(t)
+	srv.memoryStore = &mockMemoryStore{briefing: "should not be called"}
+	// srv.provider remains nil
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "GET", "/api/briefing", "")
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["error"] == "" {
+		t.Error("expected error field in response")
+	}
+}
+
+// TestBriefingWithMemoryAndProvider verifies that GET /api/briefing returns
+// 200 with the briefing text from the memory store when both are configured.
+func TestBriefingWithMemoryAndProvider(t *testing.T) {
+	srv, _ := testServer(t)
+	expectedBriefing := "Welcome back. Last time we explored your anxious part."
+	srv.memoryStore = &mockMemoryStore{briefing: expectedBriefing}
+	srv.provider = &mockProvider{}
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "GET", "/api/briefing", "")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp briefingResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Briefing != expectedBriefing {
+		t.Errorf("expected briefing %q, got %q", expectedBriefing, resp.Briefing)
+	}
+}
+
+// TestBriefingContentType verifies that GET /api/briefing returns JSON.
+func TestBriefingContentType(t *testing.T) {
+	srv, _ := testServer(t)
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "GET", "/api/briefing", "")
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type=application/json, got %q", ct)
+	}
+}
+
+// ── Accept-disclaimer endpoint tests ────────────────────────────
+
+// TestAcceptDisclaimerSetsFlag verifies that POST /api/accept-disclaimer
+// sets DisclaimerAccepted=true in the in-memory config.
+func TestAcceptDisclaimerSetsFlag(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	srv, _ := testServer(t)
+	handler := srv.SetupRoutes()
+
+	// Disclaimer should start as false.
+	if srv.cfg.DisclaimerAccepted {
+		t.Fatal("expected DisclaimerAccepted=false before acceptance")
+	}
+
+	rr := doRequest(t, handler, "POST", "/api/accept-disclaimer", "")
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp map[string]bool
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp["accepted"] {
+		t.Error("expected accepted=true in response")
+	}
+
+	// In-memory config should be updated.
+	if !srv.cfg.DisclaimerAccepted {
+		t.Error("expected DisclaimerAccepted=true after acceptance")
+	}
+	if srv.cfg.DisclaimerAcceptedAt == "" {
+		t.Error("expected DisclaimerAcceptedAt to be set after acceptance")
+	}
+}
+
+// TestAcceptDisclaimerPersists verifies that POST /api/accept-disclaimer
+// saves the acceptance to disk so it survives a reload.
+func TestAcceptDisclaimerPersists(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	srv, _ := testServer(t)
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "POST", "/api/accept-disclaimer", "")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Reload config from disk and verify the flag persisted.
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !loaded.DisclaimerAccepted {
+		t.Error("expected DisclaimerAccepted=true after reload from disk")
+	}
+	if loaded.DisclaimerAcceptedAt == "" {
+		t.Error("expected DisclaimerAcceptedAt to be non-empty after reload from disk")
+	}
+}
+
+// TestAcceptDisclaimerContentType verifies the response is JSON.
+func TestAcceptDisclaimerContentType(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	srv, _ := testServer(t)
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "POST", "/api/accept-disclaimer", "")
+
+	ct := rr.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("expected Content-Type=application/json, got %q", ct)
+	}
+}
+
+// ── Test-provider endpoint tests ─────────────────────────────────
+
+// testProviderServer creates a mock HTTP server that simulates an LLM API.
+// It returns the server URL and a cleanup function.
+func testProviderServer(t *testing.T, statusCode int, body string) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	// Anthropic endpoint.
+	mux.HandleFunc("/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(statusCode)
+		if statusCode == http.StatusOK {
+			// Minimal valid Anthropic SSE stream.
+			fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":0}}}\n\n")
+			fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+			fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}\n\n")
+			fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+			fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n")
+			fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		} else {
+			fmt.Fprint(w, body)
+		}
+	})
+	// OpenAI-compatible endpoint.
+	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(statusCode)
+		if statusCode == http.StatusOK {
+			// Minimal valid OpenAI SSE stream.
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\n")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+		} else {
+			fmt.Fprint(w, body)
+		}
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
+
+// TestTestProviderClaudeSuccess verifies that a valid Claude key returns success.
+func TestTestProviderClaudeSuccess(t *testing.T) {
+	mockURL := testProviderServer(t, http.StatusOK, "")
+
+	srv, _ := testServer(t)
+	// Point Claude at the mock server.
+	srv.cfg.Providers.Claude.BaseURL = mockURL
+	handler := srv.SetupRoutes()
+
+	body := `{"provider":"claude","api_key":"sk-ant-valid-key-1234"}`
+	rr := doRequest(t, handler, "POST", "/api/test-provider", body)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp testProviderResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got error: %s", resp.Error)
+	}
+}
+
+// TestTestProviderGrokSuccess verifies that a valid Grok key returns success.
+func TestTestProviderGrokSuccess(t *testing.T) {
+	mockURL := testProviderServer(t, http.StatusOK, "")
+
+	srv, _ := testServer(t)
+	srv.cfg.Providers.Grok.BaseURL = mockURL
+	handler := srv.SetupRoutes()
+
+	body := `{"provider":"grok","api_key":"xai-valid-key-1234"}`
+	rr := doRequest(t, handler, "POST", "/api/test-provider", body)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp testProviderResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success=true, got error: %s", resp.Error)
+	}
+}
+
+// TestTestProviderInvalidKey verifies that a 401 response returns success=false.
+func TestTestProviderInvalidKey(t *testing.T) {
+	mockURL := testProviderServer(t, http.StatusUnauthorized,
+		`{"error":{"type":"authentication_error","message":"invalid x-api-key"}}`)
+
+	srv, _ := testServer(t)
+	srv.cfg.Providers.Claude.BaseURL = mockURL
+	handler := srv.SetupRoutes()
+
+	body := `{"provider":"claude","api_key":"sk-ant-bad-key"}`
+	rr := doRequest(t, handler, "POST", "/api/test-provider", body)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp testProviderResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Success {
+		t.Error("expected success=false for invalid key")
+	}
+	if resp.Error == "" {
+		t.Error("expected non-empty error message")
+	}
+}
+
+// TestTestProviderMissingFields verifies that missing required fields return 400.
+func TestTestProviderMissingFields(t *testing.T) {
+	srv, _ := testServer(t)
+	handler := srv.SetupRoutes()
+
+	// Missing api_key.
+	rr := doRequest(t, handler, "POST", "/api/test-provider", `{"provider":"claude"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing api_key, got %d", rr.Code)
+	}
+
+	// Missing provider.
+	rr = doRequest(t, handler, "POST", "/api/test-provider", `{"api_key":"sk-ant-key"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing provider, got %d", rr.Code)
+	}
+
+	// Unknown provider.
+	rr = doRequest(t, handler, "POST", "/api/test-provider", `{"provider":"openai","api_key":"sk-key"}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for unknown provider, got %d", rr.Code)
+	}
+}
+
+// TestTestProviderInvalidJSON verifies that malformed JSON returns 400.
+func TestTestProviderInvalidJSON(t *testing.T) {
+	srv, _ := testServer(t)
+	handler := srv.SetupRoutes()
+
+	rr := doRequest(t, handler, "POST", "/api/test-provider", `{not valid json}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid JSON, got %d", rr.Code)
 	}
 }

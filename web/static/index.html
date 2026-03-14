@@ -1,3 +1,70 @@
 <!DOCTYPE html>
-<html><head><title>IFS-Kiseki</title></head>
-<body><h1>IFS-Kiseki</h1><p>Coming soon.</p></body></html>
+<html lang="en" data-theme="warm">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="IFS-Kiseki — Your IFS self-therapy companion" />
+  <title>IFS-Kiseki — Your IFS Companion</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Navigation bar ─────────────────────────────────────── -->
+    <nav id="navbar" role="banner" aria-label="Application navigation">
+      <div id="navbar-brand">
+        <button id="sidebar-toggle" aria-label="Toggle session list" aria-expanded="true" aria-controls="sidebar">
+          <span class="icon-menu" aria-hidden="true">&#9776;</span>
+        </button>
+        <span id="navbar-title">IFS-Kiseki</span>
+      </div>
+      <div id="navbar-actions">
+        <span id="connection-status" class="status-dot status-connecting" aria-live="polite" aria-label="Connection status: connecting"></span>
+        <button id="nav-chat" class="nav-btn nav-btn-active" aria-current="page" data-route="chat">Chat</button>
+        <button id="nav-settings" class="nav-btn" data-route="settings">Settings</button>
+      </div>
+    </nav>
+
+    <!-- ── Main layout ────────────────────────────────────────── -->
+    <div id="layout">
+
+      <!-- Sidebar: session list -->
+      <aside id="sidebar" aria-label="Session history">
+        <div id="sidebar-header">
+          <button id="new-session-btn" class="btn btn-primary" aria-label="Start a new session">
+            + New Session
+          </button>
+        </div>
+        <div id="session-list" role="list" aria-label="Past sessions">
+          <!-- Populated by sidebar.js (Step 4.4) -->
+          <p class="sidebar-empty">No past sessions yet.</p>
+        </div>
+      </aside>
+
+      <!-- Main content area -->
+      <main id="main-content" role="main">
+
+        <!-- Chat view -->
+        <div id="chat-container" class="view view-active" data-view="chat" aria-label="Chat with your IFS companion">
+          <!-- Populated by components/chat.js -->
+        </div>
+
+        <!-- Settings view -->
+        <div id="settings-container" class="view" data-view="settings" aria-label="Settings" hidden>
+          <!-- Populated by components/settings.js -->
+        </div>
+
+      </main>
+    </div><!-- /#layout -->
+
+  </div><!-- /#app -->
+
+  <!-- Scripts — order matters: components before app bootstrap -->
+  <script src="/components/chat.js"></script>
+  <script src="/components/crisis.js"></script>
+  <script src="/components/sidebar.js"></script>
+  <script src="/components/settings.js"></script>
+  <script src="/components/onboarding.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

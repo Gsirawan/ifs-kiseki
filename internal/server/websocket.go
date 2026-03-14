@@ -12,6 +12,7 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/Gsirawan/ifs-kiseki/internal/chat"
+	"github.com/Gsirawan/ifs-kiseki/internal/crisis"
 )
 
 // ── Wire types ──────────────────────────────────────────────────
@@ -28,6 +29,7 @@ type wsOutgoing struct {
 	Content   string   `json:"content,omitempty"`
 	Message   string   `json:"message,omitempty"`
 	SessionID string   `json:"session_id,omitempty"`
+	Resources string   `json:"resources,omitempty"`
 	Usage     *wsUsage `json:"usage,omitempty"`
 }
 
@@ -42,11 +44,16 @@ type wsUsage struct {
 // WebSocketHandler manages WebSocket connections for chat streaming.
 type WebSocketHandler struct {
 	engine *chat.Engine
+	crisis *crisis.RegexCrisisDetector // may be nil — crisis detection optional
 }
 
 // NewWebSocketHandler creates a WebSocket handler backed by the chat engine.
-func NewWebSocketHandler(engine *chat.Engine) *WebSocketHandler {
-	return &WebSocketHandler{engine: engine}
+// Pass a non-nil crisis detector to enable crisis keyword scanning.
+func NewWebSocketHandler(engine *chat.Engine, crisisDetector *crisis.RegexCrisisDetector) *WebSocketHandler {
+	return &WebSocketHandler{
+		engine: engine,
+		crisis: crisisDetector,
+	}
 }
 
 // HandleWebSocket upgrades the HTTP connection to WebSocket and runs the
@@ -86,6 +93,12 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	h.readLoop(r.Context(), conn)
 
 	log.Printf("[ws] client disconnected from %s", r.RemoteAddr)
+
+	// Save the session to memory on disconnect. This is async inside EndSession —
+	// it fires a goroutine and returns immediately so we don't block shutdown.
+	if err := h.engine.EndSession(); err != nil {
+		log.Printf("[ws] EndSession on disconnect: %v", err)
+	}
 }
 
 // readLoop reads JSON messages from the WebSocket and dispatches them.
@@ -133,6 +146,12 @@ func (h *WebSocketHandler) dispatch(ctx context.Context, conn *websocket.Conn, m
 
 // handleMessage sends a user message to the chat engine and streams
 // response tokens back over the WebSocket.
+//
+// Crisis check: if a crisis detector is configured, the message is scanned
+// BEFORE being sent to the LLM. If crisis content is detected:
+//   - A {"type":"crisis","resources":"..."} message is sent to the client.
+//   - The message is NOT forwarded to the LLM.
+//   - The message content is NOT logged (privacy).
 func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Conn, content string) {
 	if content == "" {
 		_ = h.sendJSON(ctx, conn, wsOutgoing{
@@ -140,6 +159,20 @@ func (h *WebSocketHandler) handleMessage(ctx context.Context, conn *websocket.Co
 			Message: "empty message content",
 		})
 		return
+	}
+
+	// ── Crisis check (BEFORE LLM call) ──────────────────────────
+	if h.crisis != nil {
+		if detected, category := h.crisis.Scan(content); detected {
+			// Log the detection category — NOT the message content (privacy).
+			log.Printf("[crisis] crisis content detected (category: %s) — resources sent, message not forwarded to LLM", category)
+
+			_ = h.sendJSON(ctx, conn, wsOutgoing{
+				Type:      "crisis",
+				Resources: h.crisis.Resources(),
+			})
+			return // Do NOT send to LLM.
+		}
 	}
 
 	// Create a child context with timeout for the LLM call.

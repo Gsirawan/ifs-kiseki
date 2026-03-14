@@ -20,6 +20,12 @@ type Config struct {
 	Crisis     CrisisConfig     `json:"crisis"`
 	Memory     MemoryConfig     `json:"memory"`
 	UI         UIConfig         `json:"ui"`
+
+	// Onboarding — tracks whether the user has accepted the disclaimer.
+	// DisclaimerAccepted is false until the user completes the first-launch flow.
+	// DisclaimerAcceptedAt is an RFC3339 timestamp set when acceptance is recorded.
+	DisclaimerAccepted   bool   `json:"disclaimer_accepted"`
+	DisclaimerAcceptedAt string `json:"disclaimer_accepted_at"`
 }
 
 // ProvidersConfig holds all provider entries keyed by name.
@@ -155,17 +161,24 @@ func DefaultConfig() *Config {
 			Theme:    "warm",
 			FontSize: "medium",
 		},
+
+		// Disclaimer must be explicitly accepted on first launch.
+		DisclaimerAccepted:   false,
+		DisclaimerAcceptedAt: "",
 	}
 }
 
-// ResolveAPIKeys overrides provider API keys with environment variables.
+// ResolveEnvOverrides overrides config values with environment variables.
 // Env vars always take precedence over config.json values.
-func (c *Config) ResolveAPIKeys() {
+func (c *Config) ResolveEnvOverrides() {
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 		c.Providers.Claude.APIKey = key
 	}
 	if key := os.Getenv("XAI_API_KEY"); key != "" {
 		c.Providers.Grok.APIKey = key
+	}
+	if host := os.Getenv("OLLAMA_HOST"); host != "" {
+		c.Embeddings.OllamaHost = host
 	}
 }
 
@@ -183,7 +196,7 @@ func Load() (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := DefaultConfig()
-			cfg.ResolveAPIKeys()
+			cfg.ResolveEnvOverrides()
 			return cfg, nil
 		}
 		return nil, err
@@ -193,7 +206,7 @@ func Load() (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
-	cfg.ResolveAPIKeys()
+	cfg.ResolveEnvOverrides()
 	return cfg, nil
 }
 

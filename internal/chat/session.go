@@ -2,11 +2,10 @@
 package chat
 
 import (
-	"crypto/rand"
-	"fmt"
 	"sync"
 	"time"
 
+	"github.com/Gsirawan/ifs-kiseki/internal/id"
 	"github.com/Gsirawan/ifs-kiseki/internal/provider"
 )
 
@@ -31,10 +30,11 @@ type UsageTotal struct {
 	Turns        int
 }
 
-// NewSession creates a fresh session with a UUID and current timestamp.
-func NewSession() *Session {
+// newSession creates a fresh session with a UUID and current timestamp.
+// Unexported — callers outside this package go through Engine.NewSession().
+func newSession() *Session {
 	return &Session{
-		ID:        generateUUID(),
+		ID:        id.New(),
 		Messages:  make([]provider.ChatMessage, 0),
 		StartedAt: time.Now(),
 	}
@@ -52,9 +52,13 @@ func (s *Session) AddMessage(role, content string) {
 }
 
 // End marks the session as ended with the current timestamp.
+// Idempotent — only sets EndedAt on the first call.
 func (s *Session) End() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.EndedAt != nil {
+		return // already ended
+	}
 	now := time.Now()
 	s.EndedAt = &now
 }
@@ -70,16 +74,4 @@ func (s *Session) AddUsage(u *provider.Usage) {
 	s.Usage.InputTokens += u.InputTokens
 	s.Usage.OutputTokens += u.OutputTokens
 	s.Usage.Turns++
-}
-
-// generateUUID produces a v4 UUID using crypto/rand. No external dependencies.
-func generateUUID() string {
-	var uuid [16]byte
-	_, _ = rand.Read(uuid[:])
-	// Set version 4 (bits 12-15 of time_hi_and_version).
-	uuid[6] = (uuid[6] & 0x0f) | 0x40
-	// Set variant bits (bits 6-7 of clock_seq_hi_and_reserved).
-	uuid[8] = (uuid[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
 }

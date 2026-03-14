@@ -15,7 +15,10 @@ import (
 
 	"github.com/Gsirawan/ifs-kiseki/internal/chat"
 	"github.com/Gsirawan/ifs-kiseki/internal/config"
+	"github.com/Gsirawan/ifs-kiseki/internal/crisis"
 	"github.com/Gsirawan/ifs-kiseki/internal/db"
+	"github.com/Gsirawan/ifs-kiseki/internal/embedder"
+	"github.com/Gsirawan/ifs-kiseki/internal/memory"
 	"github.com/Gsirawan/ifs-kiseki/internal/provider"
 	"github.com/Gsirawan/ifs-kiseki/internal/server"
 	"github.com/Gsirawan/ifs-kiseki/web"
@@ -65,10 +68,40 @@ func main() {
 		}
 	}
 
+	// ── Create memory store ─────────────────────────────────────
+	// Embedder is optional — if Ollama is unreachable, memory still saves
+	// sessions (without vector embeddings) and briefing still works.
+	var memoryStore *memory.SQLiteStore
+	ollamaClient := embedder.NewOllamaClient(
+		cfg.Embeddings.OllamaHost,
+		cfg.Embeddings.Model,
+		cfg.Embeddings.Dimension,
+	)
+	ctx := context.Background()
+	if ollamaClient.IsHealthy(ctx) {
+		memoryStore = memory.NewSQLiteStore(database, ollamaClient)
+		log.Printf("memory: Ollama embedder ready (%s)", cfg.Embeddings.Model)
+	} else {
+		memoryStore = memory.NewSQLiteStore(database, nil) // embeddings disabled
+		log.Printf("memory: Ollama not reachable — sessions saved without embeddings")
+	}
+
 	// ── Create chat engine ──────────────────────────────────────
 	var engine *chat.Engine
 	if activeProvider != nil {
-		engine = chat.NewEngine(activeProvider, cfg)
+		engine = chat.NewEngine(activeProvider, cfg, memoryStore)
+	}
+
+	// ── Create crisis detector ───────────────────────────────────
+	// Crisis detection is NON-NEGOTIABLE — always enabled unless explicitly
+	// disabled in config. The detector is created regardless of LLM provider
+	// availability — it scans messages before they reach the LLM.
+	var crisisDetector *crisis.RegexCrisisDetector
+	if cfg.Crisis.Enabled {
+		crisisDetector = crisis.NewRegexCrisisDetector(cfg.Crisis.HotlineCountry)
+		log.Printf("crisis: detection enabled (country: %s)", cfg.Crisis.HotlineCountry)
+	} else {
+		log.Printf("WARNING: crisis detection is DISABLED in config — not recommended")
 	}
 
 	// ── Create server ───────────────────────────────────────────
@@ -77,7 +110,7 @@ func main() {
 		log.Fatalf("failed to create sub filesystem: %v", err)
 	}
 
-	srv := server.NewServer(database, cfg, http.FS(staticFS), engine)
+	srv := server.NewServer(database, cfg, http.FS(staticFS), engine, memoryStore, activeProvider, crisisDetector)
 	srv.SetVersion(Version)
 	handler := srv.SetupRoutes()
 

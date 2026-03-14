@@ -2,11 +2,19 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	// memory package transitively imports sqlite-vec CGO bindings.
+	// go-sqlite3 must be imported here to provide the sqlite3_* symbols
+	// that sqlite-vec needs at link time.
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/Gsirawan/ifs-kiseki/internal/config"
+	"github.com/Gsirawan/ifs-kiseki/internal/memory"
 	"github.com/Gsirawan/ifs-kiseki/internal/provider"
 )
 
@@ -111,7 +119,7 @@ func collectEvents(t *testing.T, ch <-chan provider.StreamEvent) []provider.Stre
 
 func TestNewSession(t *testing.T) {
 	mock := newMockProvider("hello")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 
 	id := engine.NewSession()
 
@@ -143,7 +151,7 @@ func TestNewSession(t *testing.T) {
 
 func TestSendMessage(t *testing.T) {
 	mock := newMockProvider("I hear you")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 	engine.NewSession()
 
 	ch, err := engine.SendMessage(context.Background(), "Hello, I feel anxious")
@@ -217,7 +225,7 @@ func TestSendMessage(t *testing.T) {
 
 func TestSendMessageNoSession(t *testing.T) {
 	mock := newMockProvider("hello")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 
 	// No session created — should error.
 	_, err := engine.SendMessage(context.Background(), "hello")
@@ -231,7 +239,7 @@ func TestSendMessageNoSession(t *testing.T) {
 
 func TestGetHistoryEmpty(t *testing.T) {
 	mock := newMockProvider("hello")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 
 	// No session — should return nil.
 	history := engine.GetHistory()
@@ -252,7 +260,7 @@ func TestGetHistoryEmpty(t *testing.T) {
 
 func TestGetHistoryOrdering(t *testing.T) {
 	mock := newMockProvider("response")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 	engine.NewSession()
 
 	// Manually add messages to verify ordering.
@@ -285,7 +293,7 @@ func TestGetHistoryOrdering(t *testing.T) {
 
 func TestMultiTurn(t *testing.T) {
 	mock := newMockProvider("first response")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 	engine.NewSession()
 
 	// Turn 1.
@@ -357,7 +365,7 @@ func TestSetProvider(t *testing.T) {
 	mock2 := newMockProvider("from provider two")
 	mock2.name = "Provider2"
 
-	engine := NewEngine(mock1, testConfig())
+	engine := NewEngine(mock1, testConfig(), nil)
 	engine.NewSession()
 
 	// Turn 1 with provider 1.
@@ -421,7 +429,7 @@ func TestStreamError(t *testing.T) {
 	}
 
 	// Override StreamChat to send an error event mid-stream.
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 	engine.NewSession()
 
 	// Use a custom mock that sends an error event.
@@ -466,10 +474,11 @@ func (m *errorStreamMock) StreamChat(_ context.Context, _ provider.ChatRequest) 
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
-	prompt := BuildSystemPrompt("Kira", []string{"anxiety", "perfectionism"}, "Be gentle.")
+	prompt := BuildSystemPrompt("Kira", "", []string{"anxiety", "perfectionism"}, "Be gentle.")
 
-	if !strings.Contains(prompt, "You are Kira") {
-		t.Error("expected prompt to contain companion name")
+	// The new prompt structure uses "Your name is: Kira" in the companion definition.
+	if !strings.Contains(prompt, "Your name is: Kira") {
+		t.Error("expected prompt to contain companion name in definition section")
 	}
 	if !strings.Contains(prompt, "IFS-informed") {
 		t.Error("expected prompt to mention IFS")
@@ -486,18 +495,34 @@ func TestBuildSystemPrompt(t *testing.T) {
 }
 
 func TestBuildSystemPromptMinimal(t *testing.T) {
-	prompt := BuildSystemPrompt("Companion", nil, "")
+	prompt := BuildSystemPrompt("Companion", "", nil, "")
 
-	if !strings.Contains(prompt, "You are Companion") {
-		t.Error("expected prompt to contain companion name")
+	// The new prompt structure uses "Your name is: Companion" in the companion definition.
+	if !strings.Contains(prompt, "Your name is: Companion") {
+		t.Error("expected prompt to contain companion name in definition section")
 	}
-	if strings.Contains(prompt, "Focus areas") {
+	if strings.Contains(prompt, "Focus areas:") {
 		t.Error("expected no focus areas section when empty")
+	}
+	// When user name is empty, the prompt uses "friend" fallback — no explicit "user's name is" line.
+	if strings.Contains(prompt, "The user's name is: \n") {
+		t.Error("expected no empty user name line")
+	}
+}
+
+func TestBuildSystemPromptWithUserName(t *testing.T) {
+	prompt := BuildSystemPrompt("Kira", "Ghaith", []string{"anxiety"}, "")
+
+	if !strings.Contains(prompt, "Ghaith") {
+		t.Error("expected prompt to contain user name")
+	}
+	if !strings.Contains(prompt, "The user's name is: Ghaith") {
+		t.Error("expected prompt to contain user name in definition section")
 	}
 }
 
 func TestSessionEnd(t *testing.T) {
-	session := NewSession()
+	session := newSession()
 
 	if session.EndedAt != nil {
 		t.Error("expected EndedAt to be nil before End()")
@@ -515,7 +540,7 @@ func TestSessionEnd(t *testing.T) {
 
 func TestNewSessionReplacesOld(t *testing.T) {
 	mock := newMockProvider("hello")
-	engine := NewEngine(mock, testConfig())
+	engine := NewEngine(mock, testConfig(), nil)
 
 	id1 := engine.NewSession()
 	engine.GetSession().AddMessage("user", "old message")
@@ -530,5 +555,380 @@ func TestNewSessionReplacesOld(t *testing.T) {
 	history := engine.GetHistory()
 	if len(history) != 0 {
 		t.Errorf("expected empty history after new session, got %d messages", len(history))
+	}
+}
+
+// ── Mock Memory Store ──────────────────────────────────────────────
+
+// mockMemoryStore implements memory.Store for testing.
+// It records every SaveSession call so tests can assert on it.
+type mockMemoryStore struct {
+	mu      sync.Mutex
+	saved   []memory.Session
+	saveErr error // if set, SaveSession returns this error
+}
+
+func (m *mockMemoryStore) SaveSession(_ context.Context, sess memory.Session) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saved = append(m.saved, sess)
+	return nil
+}
+
+func (m *mockMemoryStore) Search(_ context.Context, _ string, _ int) ([]memory.Result, error) {
+	return nil, nil
+}
+
+func (m *mockMemoryStore) GenerateBriefing(_ context.Context, _ provider.Provider) (string, error) {
+	return "", nil
+}
+
+// savedSessions returns a snapshot of all saved sessions (thread-safe).
+func (m *mockMemoryStore) savedSessions() []memory.Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]memory.Session, len(m.saved))
+	copy(out, m.saved)
+	return out
+}
+
+// ── Step 3.4: InjectMemoryContext tests ────────────────────────────
+
+func TestInjectMemoryContextEmpty(t *testing.T) {
+	base := "You are Kira, an IFS companion."
+
+	// nil slice — prompt must be returned unchanged.
+	result := InjectMemoryContext(base, nil)
+	if result != base {
+		t.Errorf("expected unchanged prompt with nil memories, got %q", result)
+	}
+
+	// empty slice — same.
+	result = InjectMemoryContext(base, []memory.Result{})
+	if result != base {
+		t.Errorf("expected unchanged prompt with empty memories, got %q", result)
+	}
+}
+
+func TestInjectMemoryContextWithResults(t *testing.T) {
+	base := "You are Kira."
+	ts := time.Date(2026, 3, 10, 14, 30, 0, 0, time.UTC)
+
+	memories := []memory.Result{
+		{Text: "I feel anxious about my perfectionist part.", Timestamp: ts},
+		{Text: "We explored the inner critic today.", Timestamp: ts.Add(time.Hour)},
+	}
+
+	result := InjectMemoryContext(base, memories)
+
+	// Must contain the base prompt.
+	if !strings.Contains(result, base) {
+		t.Error("expected result to contain base prompt")
+	}
+	// Must contain the memory section markers.
+	if !strings.Contains(result, "[MEMORY CONTEXT]") {
+		t.Error("expected result to contain [MEMORY CONTEXT] marker")
+	}
+	if !strings.Contains(result, "[END MEMORY CONTEXT]") {
+		t.Error("expected result to contain [END MEMORY CONTEXT] marker")
+	}
+	// Must contain the memory text.
+	if !strings.Contains(result, "perfectionist part") {
+		t.Error("expected result to contain first memory text")
+	}
+	if !strings.Contains(result, "inner critic") {
+		t.Error("expected result to contain second memory text")
+	}
+	// Must contain the timestamp.
+	if !strings.Contains(result, "2026-03-10") {
+		t.Error("expected result to contain formatted timestamp")
+	}
+	// Memory section must come after the base prompt.
+	baseIdx := strings.Index(result, base)
+	memIdx := strings.Index(result, "[MEMORY CONTEXT]")
+	if memIdx <= baseIdx {
+		t.Error("expected [MEMORY CONTEXT] to appear after base prompt")
+	}
+}
+
+func TestInjectMemoryContextTruncation(t *testing.T) {
+	base := "You are Kira."
+	ts := time.Now()
+
+	// Build a text longer than maxMemoryTextLen (200 chars).
+	longText := strings.Repeat("a", 250)
+
+	memories := []memory.Result{
+		{Text: longText, Timestamp: ts},
+	}
+
+	result := InjectMemoryContext(base, memories)
+
+	// The full 250-char string must NOT appear verbatim.
+	if strings.Contains(result, longText) {
+		t.Error("expected long memory text to be truncated")
+	}
+	// The truncated version (200 chars + "...") must appear.
+	truncated := longText[:maxMemoryTextLen] + "..."
+	if !strings.Contains(result, truncated) {
+		t.Errorf("expected truncated text to appear in result")
+	}
+}
+
+// ── Step 3.4: mockSearchStore — extends mockMemoryStore with search tracking ──
+
+// mockSearchStore wraps mockMemoryStore and adds configurable Search behaviour.
+// Used only by Step 3.4 tests so it doesn't conflict with Step 3.3's mockMemoryStore.
+type mockSearchStore struct {
+	mockMemoryStore                 // embed for SaveSession / GenerateBriefing
+	searchQuery     string          // last query passed to Search
+	searchResults   []memory.Result // results to return
+	searchErr       error           // if set, Search returns this error
+	searchMu        sync.Mutex
+}
+
+func (m *mockSearchStore) Search(_ context.Context, query string, _ int) ([]memory.Result, error) {
+	m.searchMu.Lock()
+	defer m.searchMu.Unlock()
+	m.searchQuery = query
+	if m.searchErr != nil {
+		return nil, m.searchErr
+	}
+	return m.searchResults, nil
+}
+
+// ── Step 3.4: SendMessage memory injection tests ───────────────────
+
+func TestSendMessageInjectsMemoryContext(t *testing.T) {
+	mock := newMockProvider("I remember your perfectionist part.")
+	ts := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+
+	store := &mockSearchStore{
+		searchResults: []memory.Result{
+			{Text: "my perfectionist part causes me stress", Timestamp: ts},
+		},
+	}
+
+	engine := NewEngine(mock, testConfig(), store)
+	engine.NewSession()
+
+	ch, err := engine.SendMessage(context.Background(), "I feel anxious")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	collectEvents(t, ch)
+
+	// Verify the store was searched with the user's message as the query.
+	store.searchMu.Lock()
+	query := store.searchQuery
+	store.searchMu.Unlock()
+
+	if query != "I feel anxious" {
+		t.Errorf("expected search query %q, got %q", "I feel anxious", query)
+	}
+
+	// Verify the system prompt sent to the provider contains the memory context.
+	if mock.lastRequest == nil {
+		t.Fatal("expected lastRequest to be captured")
+	}
+	if !strings.Contains(mock.lastRequest.SystemPrompt, "[MEMORY CONTEXT]") {
+		t.Error("expected system prompt to contain [MEMORY CONTEXT] section")
+	}
+	if !strings.Contains(mock.lastRequest.SystemPrompt, "perfectionist part") {
+		t.Error("expected system prompt to contain memory text")
+	}
+}
+
+func TestSendMessageNoMemoryStoreSkipsInjection(t *testing.T) {
+	mock := newMockProvider("hello")
+	engine := NewEngine(mock, testConfig(), nil) // no store
+	engine.NewSession()
+
+	ch, err := engine.SendMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	collectEvents(t, ch)
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected lastRequest to be captured")
+	}
+	// No memory store — system prompt must NOT contain memory section.
+	if strings.Contains(mock.lastRequest.SystemPrompt, "[MEMORY CONTEXT]") {
+		t.Error("expected no [MEMORY CONTEXT] section when store is nil")
+	}
+}
+
+func TestSendMessageMemorySearchErrorIsNonFatal(t *testing.T) {
+	mock := newMockProvider("hello")
+
+	store := &mockSearchStore{
+		searchErr: errors.New("embed: connection refused"),
+	}
+
+	engine := NewEngine(mock, testConfig(), store)
+	engine.NewSession()
+
+	// Search will fail — SendMessage must still succeed.
+	ch, err := engine.SendMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("SendMessage should not fail when memory search errors: %v", err)
+	}
+	collectEvents(t, ch)
+
+	// System prompt must not contain memory section (search failed).
+	if mock.lastRequest == nil {
+		t.Fatal("expected lastRequest to be captured")
+	}
+	if strings.Contains(mock.lastRequest.SystemPrompt, "[MEMORY CONTEXT]") {
+		t.Error("expected no [MEMORY CONTEXT] section when search fails")
+	}
+}
+
+func TestSendMessageEmptyMemoryResultsNoSection(t *testing.T) {
+	mock := newMockProvider("hello")
+
+	store := &mockSearchStore{
+		searchResults: []memory.Result{}, // empty — no relevant past context
+	}
+
+	engine := NewEngine(mock, testConfig(), store)
+	engine.NewSession()
+
+	ch, err := engine.SendMessage(context.Background(), "hello")
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	collectEvents(t, ch)
+
+	if mock.lastRequest == nil {
+		t.Fatal("expected lastRequest to be captured")
+	}
+	// Empty results — no memory section should be injected.
+	if strings.Contains(mock.lastRequest.SystemPrompt, "[MEMORY CONTEXT]") {
+		t.Error("expected no [MEMORY CONTEXT] section when search returns empty results")
+	}
+}
+
+// ── New Tests ──────────────────────────────────────────────────────
+
+// TestEndSession verifies that EndSession saves the current session to the
+// memory store and marks it as ended.
+func TestEndSession(t *testing.T) {
+	mock := newMockProvider("hello")
+	store := &mockMemoryStore{}
+	engine := NewEngine(mock, testConfig(), store)
+
+	// No session — EndSession should be a no-op.
+	if err := engine.EndSession(); err != nil {
+		t.Fatalf("EndSession with no session returned error: %v", err)
+	}
+	if len(store.savedSessions()) != 0 {
+		t.Fatal("expected no saves when there is no session")
+	}
+
+	// Create a session and add a message.
+	engine.NewSession()
+	engine.GetSession().AddMessage("user", "I feel overwhelmed")
+	engine.GetSession().AddMessage("assistant", "Tell me more about that feeling.")
+
+	sessionID := engine.GetSession().ID
+
+	// End the session.
+	if err := engine.EndSession(); err != nil {
+		t.Fatalf("EndSession returned error: %v", err)
+	}
+
+	// The goroutine is async — give it a moment to complete.
+	deadline := time.Now().Add(2 * time.Second)
+	var sessions []memory.Session
+	for time.Now().Before(deadline) {
+		sessions = store.savedSessions()
+		if len(sessions) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 saved session, got %d", len(sessions))
+	}
+
+	saved := sessions[0]
+
+	if saved.ID != sessionID {
+		t.Errorf("saved session ID mismatch: got %q, want %q", saved.ID, sessionID)
+	}
+	if len(saved.Messages) != 2 {
+		t.Errorf("expected 2 messages in saved session, got %d", len(saved.Messages))
+	}
+	if saved.Messages[0].Role != "user" || saved.Messages[0].Content != "I feel overwhelmed" {
+		t.Errorf("unexpected first message: %+v", saved.Messages[0])
+	}
+	if saved.EndedAt.IsZero() {
+		t.Error("expected EndedAt to be set on saved session")
+	}
+	if saved.StartedAt.IsZero() {
+		t.Error("expected StartedAt to be set on saved session")
+	}
+}
+
+// TestNewSessionSavesOld verifies that starting a new session automatically
+// saves the previous session to the memory store.
+func TestNewSessionSavesOld(t *testing.T) {
+	mock := newMockProvider("hello")
+	store := &mockMemoryStore{}
+	engine := NewEngine(mock, testConfig(), store)
+
+	// Session 1 — add a message.
+	engine.NewSession()
+	engine.GetSession().AddMessage("user", "first session message")
+	firstID := engine.GetSession().ID
+
+	// Start session 2 — should trigger save of session 1.
+	engine.NewSession()
+	secondID := engine.GetSession().ID
+
+	if firstID == secondID {
+		t.Error("expected different session IDs")
+	}
+
+	// Wait for the async save to complete.
+	deadline := time.Now().Add(2 * time.Second)
+	var sessions []memory.Session
+	for time.Now().Before(deadline) {
+		sessions = store.savedSessions()
+		if len(sessions) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 saved session after NewSession, got %d", len(sessions))
+	}
+
+	saved := sessions[0]
+
+	if saved.ID != firstID {
+		t.Errorf("expected first session to be saved, got ID %q", saved.ID)
+	}
+	if len(saved.Messages) != 1 {
+		t.Errorf("expected 1 message in saved session, got %d", len(saved.Messages))
+	}
+	if saved.Messages[0].Content != "first session message" {
+		t.Errorf("unexpected message content: %q", saved.Messages[0].Content)
+	}
+	if saved.EndedAt.IsZero() {
+		t.Error("expected EndedAt to be set when session was replaced")
+	}
+
+	// Session 2 should be active and empty.
+	history := engine.GetHistory()
+	if len(history) != 0 {
+		t.Errorf("expected empty history for new session, got %d messages", len(history))
 	}
 }

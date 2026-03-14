@@ -136,3 +136,39 @@ func TestLoadReturnsDefaultsWhenNoFile(t *testing.T) {
 		t.Errorf("expected default port 3737, got %d", cfg.Server.Port)
 	}
 }
+
+func TestDisclaimerDefaultsFalse(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.DisclaimerAccepted {
+		t.Error("expected DisclaimerAccepted=false by default")
+	}
+	if cfg.DisclaimerAcceptedAt != "" {
+		t.Errorf("expected DisclaimerAcceptedAt empty by default, got %q", cfg.DisclaimerAcceptedAt)
+	}
+}
+
+func TestDisclaimerRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	cfg := DefaultConfig()
+	cfg.DisclaimerAccepted = true
+	cfg.DisclaimerAcceptedAt = "2026-03-14T15:00:00Z"
+
+	if err := Save(cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if !loaded.DisclaimerAccepted {
+		t.Error("expected DisclaimerAccepted=true after round-trip")
+	}
+	if loaded.DisclaimerAcceptedAt != "2026-03-14T15:00:00Z" {
+		t.Errorf("expected DisclaimerAcceptedAt='2026-03-14T15:00:00Z', got %q", loaded.DisclaimerAcceptedAt)
+	}
+}

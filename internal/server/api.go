@@ -1,11 +1,15 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/Gsirawan/ifs-kiseki/internal/config"
+	"github.com/Gsirawan/ifs-kiseki/internal/provider"
 )
 
 // ── Health ──────────────────────────────────────────────────────
@@ -15,6 +19,43 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"version": s.version,
 	})
+}
+
+// ── Briefing ─────────────────────────────────────────────────────
+
+// briefingResponse is the JSON shape for the briefing endpoint.
+type briefingResponse struct {
+	Briefing string `json:"briefing"`
+}
+
+// handleBriefing handles GET /api/briefing.
+//
+// It generates a warm, contextual session-start briefing by asking the LLM
+// to summarise recent sessions from memory. Two graceful-degradation cases:
+//   - No memory store: returns a static welcome message (first-run experience).
+//   - No provider: returns 503 — briefing requires an LLM.
+func (s *Server) handleBriefing(w http.ResponseWriter, r *http.Request) {
+	// No memory store — first-run or memory disabled.
+	if s.memoryStore == nil {
+		writeJSON(w, http.StatusOK, briefingResponse{
+			Briefing: "Welcome! This is your first session.",
+		})
+		return
+	}
+
+	// Briefing requires an LLM provider.
+	if s.provider == nil {
+		writeError(w, http.StatusServiceUnavailable, "no LLM provider configured — set an API key in settings")
+		return
+	}
+
+	briefing, err := s.memoryStore.GenerateBriefing(r.Context(), s.provider)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate briefing")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, briefingResponse{Briefing: briefing})
 }
 
 // ── Sessions ────────────────────────────────────────────────────
@@ -253,4 +294,149 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	writeJSON(w, http.StatusOK, providers)
+}
+
+// ── Onboarding ───────────────────────────────────────────────────
+
+// handleAcceptDisclaimer handles POST /api/accept-disclaimer.
+//
+// Records that the user has read and accepted the disclaimer. Sets
+// DisclaimerAccepted=true and DisclaimerAcceptedAt to the current time,
+// then persists the config to disk.
+func (s *Server) handleAcceptDisclaimer(w http.ResponseWriter, r *http.Request) {
+	s.cfg.DisclaimerAccepted = true
+	s.cfg.DisclaimerAcceptedAt = time.Now().Format(time.RFC3339)
+
+	if err := config.Save(s.cfg); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save disclaimer acceptance")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"accepted": true})
+}
+
+// testProviderRequest is the JSON body for POST /api/test-provider.
+type testProviderRequest struct {
+	Provider string `json:"provider"` // "claude" or "grok"
+	APIKey   string `json:"api_key"`
+}
+
+// testProviderResponse is the JSON response for POST /api/test-provider.
+type testProviderResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// handleTestProvider handles POST /api/test-provider.
+//
+// Creates a temporary provider instance with the supplied API key and sends
+// a minimal test message ("Say OK", max_tokens=10) to verify the key is valid.
+// The temporary provider is discarded after the test — it does not affect the
+// running server's active provider.
+func (s *Server) handleTestProvider(w http.ResponseWriter, r *http.Request) {
+	var req testProviderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	req.Provider = strings.TrimSpace(strings.ToLower(req.Provider))
+	req.APIKey = strings.TrimSpace(req.APIKey)
+
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+	if req.APIKey == "" {
+		writeError(w, http.StatusBadRequest, "api_key is required")
+		return
+	}
+
+	// Resolve the provider entry from config, then override the API key with
+	// the one supplied by the user (they may not have saved it yet).
+	var entry config.ProviderEntry
+	switch req.Provider {
+	case "claude":
+		entry = s.cfg.Providers.Claude
+	case "grok":
+		entry = s.cfg.Providers.Grok
+	default:
+		writeError(w, http.StatusBadRequest, "unknown provider — must be 'claude' or 'grok'")
+		return
+	}
+	entry.APIKey = req.APIKey
+
+	// Create a temporary provider instance. Max tokens capped at 10 — we only
+	// need a single word response to confirm the key is valid.
+	entry.MaxTokens = 10
+
+	p, err := provider.NewFromConfig(req.Provider, entry)
+	if err != nil {
+		writeJSON(w, http.StatusOK, testProviderResponse{
+			Success: false,
+			Error:   "failed to create provider: " + err.Error(),
+		})
+		return
+	}
+
+	// Send a minimal test message with a short timeout.
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	chatReq := provider.ChatRequest{
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: "Say OK"},
+		},
+		MaxTokens: 10,
+	}
+
+	ch, err := p.StreamChat(ctx, chatReq)
+	if err != nil {
+		// Classify common error patterns into user-friendly messages.
+		writeJSON(w, http.StatusOK, testProviderResponse{
+			Success: false,
+			Error:   classifyProviderError(err),
+		})
+		return
+	}
+
+	// Drain the channel — we only care whether the call succeeds, not the content.
+	for event := range ch {
+		if event.Type == "error" {
+			writeJSON(w, http.StatusOK, testProviderResponse{
+				Success: false,
+				Error:   classifyProviderError(event.Error),
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, testProviderResponse{Success: true})
+}
+
+// classifyProviderError converts a raw provider error into a user-friendly message.
+// The raw errors contain API-specific details that are not meaningful to end users.
+func classifyProviderError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "401") || strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "invalid x-api-key") || strings.Contains(msg, "invalid api key") ||
+		strings.Contains(msg, "authentication"):
+		return "Invalid API key — please check and try again."
+	case strings.Contains(msg, "403") || strings.Contains(msg, "forbidden"):
+		return "Access denied — your API key may not have the required permissions."
+	case strings.Contains(msg, "429") || strings.Contains(msg, "rate limit"):
+		return "Rate limit reached — please wait a moment and try again."
+	case strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "context deadline"):
+		return "Connection timed out — please check your internet connection and try again."
+	case strings.Contains(msg, "no such host") || strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "network"):
+		return "Could not reach the API — please check your internet connection."
+	default:
+		return "Connection failed — please verify your API key and try again."
+	}
 }

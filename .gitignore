@@ -1,5 +1,8 @@
 # Binary
 ifs-kiseki
+ifs-kiseki-test
+chat.test
+*.test
 
 # Database
 *.db

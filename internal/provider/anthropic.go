@@ -126,6 +126,8 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, req ChatRequest) (<-
 	if maxTokens == 0 {
 		maxTokens = p.maxTokens
 	}
+	// Temperature 0 means "use provider default" — not "deterministic".
+	// This is fine for IFS-Kiseki; no therapy user needs temperature=0.
 	temp := req.Temperature
 	if temp == 0 {
 		temp = p.temperature

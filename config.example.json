@@ -45,5 +45,7 @@
   "ui": {
     "theme": "warm",
     "font_size": "medium"
-  }
+  },
+  "disclaimer_accepted": false,
+  "disclaimer_accepted_at": ""
 }
