@@ -32,3 +32,5 @@ Thumbs.db
 
 #source
 data/
+node_modules/
+package-lock.json
